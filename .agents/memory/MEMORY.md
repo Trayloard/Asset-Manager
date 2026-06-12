@@ -1,0 +1,1 @@
+- [Integration lib dist gitignored](integration-lib-dist.md) — composite libs keep `dist/*.d.ts` out of git; a newly-restored lib breaks downstream typecheck (TS6305) until you run `tsc -b lib/<pkg>`.

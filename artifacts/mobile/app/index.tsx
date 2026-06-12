@@ -33,6 +33,7 @@ import { MessageBubble, RetryBubble, TypingBubble } from "@/components/MessageBu
 import { PresenceStatusLine } from "@/components/PresenceStatusLine";
 import { FONTS } from "@/constants/fonts";
 import { useCompanion } from "@/contexts/CompanionContext";
+import { useAccentColor } from "@/hooks/useAccentColor";
 import { useColors } from "@/hooks/useColors";
 import { useCompanionTraits } from "@/hooks/useCompanionTraits";
 import { useAuth } from "@/lib/auth";
@@ -110,6 +111,9 @@ export default function CompanionScreen() {
   const { isAuthenticated, isLoading: authLoading, login } = useAuth();
 
   const traits = useCompanionTraits(conversationId);
+  // The chrome accent gently follows Empiri's warmth (warmer → violet/pink,
+  // cooler → blue). Smoothing lives in the hook; derivation stays pure.
+  const accent = useAccentColor(traits.warmthShift);
   const [peekVisible, setPeekVisible] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
 
@@ -249,7 +253,7 @@ export default function CompanionScreen() {
               name={notificationsEnabled ? "bell" : "bell-off"}
               size={18}
               color={
-                notificationsEnabled ? colors.statusAccent : colors.mutedForeground
+                notificationsEnabled ? accent : colors.mutedForeground
               }
             />
           </Pressable>
@@ -298,7 +302,7 @@ export default function CompanionScreen() {
             <Feather
               name={voiceEnabled ? "volume-2" : "volume-x"}
               size={18}
-              color={voiceEnabled ? colors.statusAccent : colors.mutedForeground}
+              color={voiceEnabled ? accent : colors.mutedForeground}
             />
           </Pressable>
 
@@ -319,7 +323,7 @@ export default function CompanionScreen() {
           <PresenceStatusLine
             greeting={greeting}
             statusText={statusLabel(status, mood.label)}
-            color={colors.statusAccent}
+            color={accent}
           />
         </View>
 
@@ -372,7 +376,7 @@ export default function CompanionScreen() {
                 status === "thinking" || status === "transcribing" ? (
                   <TypingBubble />
                 ) : failedTurn ? (
-                  <RetryBubble onRetry={handleRetry} />
+                  <RetryBubble onRetry={handleRetry} accent={accent} />
                 ) : null
               }
               contentContainerStyle={styles.listContent}
@@ -420,6 +424,7 @@ export default function CompanionScreen() {
         cadence={checkInCadence}
         onSelect={setCheckInCadence}
         onClose={() => setSettingsVisible(false)}
+        accent={accent}
       />
     </View>
   );

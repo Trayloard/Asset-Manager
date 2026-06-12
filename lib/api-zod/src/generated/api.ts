@@ -150,3 +150,15 @@ export const SaveConversationMessageResponse = zod.object({
 })
 
 
+/**
+ * @summary Permanently delete the authenticated user and all their data
+ */
+export const DeleteAccountHeader = zod.object({
+  "Authorization": zod.string().optional().describe('Opaque session token — `Bearer <sid>`.')
+})
+
+export const DeleteAccountResponse = zod.object({
+  "success": zod.boolean()
+})
+
+

@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  Alert,
   Image,
   ScrollView,
   StyleSheet,
@@ -18,7 +19,7 @@ export default function ProfileScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user, logout } = useAuth();
+  const { user, logout, deleteAccount } = useAuth();
 
   const handleBack = () => {
     if (router.canGoBack()) {
@@ -38,6 +39,28 @@ export default function ProfileScreen() {
 
   const handleLogout = async () => {
     await logout();
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      "Delete account?",
+      "This permanently deletes your account, profile, and all your conversations. This can't be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            deleteAccount().catch(() => {
+              Alert.alert(
+                "Couldn't delete account",
+                "Something went wrong while deleting your account. Please try again.",
+              );
+            });
+          },
+        },
+      ],
+    );
   };
 
   return (
@@ -120,16 +143,31 @@ export default function ProfileScreen() {
           </Text>
         </View>
 
-        <TouchableOpacity
-          onPress={handleLogout}
-          activeOpacity={0.85}
-          style={[styles.logoutBtn, { borderColor: colors.destructive }]}
-        >
-          <Feather name="log-out" size={18} color={colors.destructive} />
-          <Text style={[styles.logoutText, { color: colors.destructive }]}>
-            Sign out
-          </Text>
-        </TouchableOpacity>
+        <View style={styles.actions}>
+          <TouchableOpacity
+            onPress={handleLogout}
+            activeOpacity={0.85}
+            style={[styles.logoutBtn, { borderColor: colors.border }]}
+          >
+            <Feather name="log-out" size={18} color={colors.foreground} />
+            <Text style={[styles.logoutText, { color: colors.foreground }]}>
+              Sign out
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={handleDeleteAccount}
+            activeOpacity={0.85}
+            style={styles.deleteBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Delete account"
+          >
+            <Feather name="trash-2" size={16} color={colors.destructive} />
+            <Text style={[styles.deleteText, { color: colors.destructive }]}>
+              Delete account
+            </Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </View>
   );
@@ -220,6 +258,20 @@ const styles = StyleSheet.create({
   },
   logoutText: {
     fontSize: 16,
+    fontWeight: "600",
+  },
+  actions: {
+    gap: 8,
+  },
+  deleteBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    height: 48,
+  },
+  deleteText: {
+    fontSize: 14,
     fontWeight: "600",
   },
 });

@@ -90,6 +90,11 @@ export const ClearConversationSuccessValue = {
 } as const;
 export type ClearConversationSuccess = typeof ClearConversationSuccessValue;
 
+export const DeleteAccountSuccessValue = {
+  success: true,
+} as const;
+export type DeleteAccountSuccess = typeof DeleteAccountSuccessValue;
+
 export interface ErrorEnvelope {
   error: string;
 }

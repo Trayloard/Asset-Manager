@@ -23,6 +23,7 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   login: () => Promise<void>;
   logout: () => Promise<void>;
+  deleteAccount: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue>({
@@ -31,6 +32,7 @@ const AuthContext = createContext<AuthContextValue>({
   isAuthenticated: false,
   login: async () => {},
   logout: async () => {},
+  deleteAccount: async () => {},
 });
 
 function getApiBaseUrl(): string {
@@ -166,6 +168,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const deleteAccount = useCallback(async () => {
+    const token = await SecureStore.getItemAsync(AUTH_TOKEN_KEY);
+    if (token) {
+      const apiBase = getApiBaseUrl();
+      const res = await fetch(`${apiBase}/api/account`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        throw new Error(`Account deletion failed (${res.status})`);
+      }
+    }
+    // Only clear local credentials once the server has confirmed deletion, so
+    // a failed request never makes the user think their account is gone.
+    await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
+    setUser(null);
+  }, []);
+
   return (
     <AuthContext.Provider
       value={{
@@ -174,6 +194,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!user,
         login,
         logout,
+        deleteAccount,
       }}
     >
       {children}

@@ -371,6 +371,37 @@ describe("deriveMessageSignal", () => {
     expect(topics).not.toContain("fascinated");
   });
 
+  it("drops generic filler nouns and nominalized verbs, keeping the real subject", () => {
+    const topics = deriveMessageSignal(
+      "I keep thinking about the form of distant galaxies",
+    ).topics;
+    expect(topics).toContain("galaxies");
+    expect(topics).not.toContain("thinking");
+    expect(topics).not.toContain("form");
+  });
+
+  it("boosts a capitalized mid-sentence proper noun (a place or person) to the top", () => {
+    expect(deriveMessageSignal("we talked about Paris over coffee").topics[0]).toBe("paris");
+    expect(deriveMessageSignal("I had dinner with Hannah last night").topics[0]).toBe("hannah");
+  });
+
+  it("surfaces a capitalized German noun as the subject (nouns are capitalized in German)", () => {
+    const topics = deriveMessageSignal("Ich denke gerade viel über Galaxien nach").topics;
+    expect(topics).toContain("galaxien");
+    expect(topics).not.toContain("denke");
+  });
+
+  it("still lets a genuine -ing interest surface when nothing stronger competes", () => {
+    // The morphology penalty is a soft demotion, not an exclusion.
+    expect(deriveMessageSignal("I love gardening").topics).toContain("gardening");
+  });
+
+  it("ignores punctuation-only tokens such as dash dividers", () => {
+    const topics = deriveMessageSignal("my family means everything ---- to me").topics;
+    expect(topics).not.toContain("----");
+    expect(topics).toContain("family");
+  });
+
   it("always feeds connection and stays within 0..1", () => {
     const s = deriveMessageSignal("I had the loveliest day at the lake with my dog today");
     expect(s.connection).toBe(1);

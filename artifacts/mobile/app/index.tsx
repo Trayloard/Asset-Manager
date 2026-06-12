@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ChatInput } from "@/components/ChatInput";
 import { Creature } from "@/components/Creature";
@@ -25,6 +26,7 @@ export default function HomeScreen() {
     useCompanion();
   const colors = useColors();
   const { user, logout } = useAuth();
+  const router = useRouter();
   const listRef = useRef<FlatList<Message>>(null);
 
   const firstName = user?.firstName?.trim() || null;
@@ -59,7 +61,13 @@ export default function HomeScreen() {
       <DynamicIsland state={creatureState} companionName={companionName} />
 
       <View style={[styles.headerRow, { borderBottomColor: colors.border }]}>
-        <View style={styles.userInfo}>
+        <TouchableOpacity
+          style={styles.userInfo}
+          onPress={() => router.push("/profile")}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Open profile"
+        >
           {user?.profileImageUrl ? (
             <Image
               source={{ uri: user.profileImageUrl }}
@@ -75,7 +83,7 @@ export default function HomeScreen() {
           <Text style={[styles.userName, { color: colors.foreground }]} numberOfLines={1}>
             {firstName ? `Hi, ${firstName}` : "Welcome"}
           </Text>
-        </View>
+        </TouchableOpacity>
         <View style={styles.headerActions}>
           {messages.length > 0 && (
             <TouchableOpacity onPress={handleClear} style={styles.clearBtn}>

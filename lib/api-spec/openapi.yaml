@@ -218,6 +218,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /account:
+    delete:
+      tags: [Auth]
+      operationId: deleteAccount
+      summary: Permanently delete the authenticated user and all their data
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationSessionHeader'
+        - $ref: '#/components/parameters/SessionCookie'
+      responses:
+        '200':
+          description: Account and all associated data deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteAccountSuccess'
+        '401':
+          description: Not authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 components:
   parameters:
     AuthorizationSessionHeader:
@@ -337,6 +358,13 @@ components:
         message:
           $ref: '#/components/schemas/ConversationMessage'
     ClearConversationSuccess:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+          const: true
+    DeleteAccountSuccess:
       type: object
       required: [success]
       properties:

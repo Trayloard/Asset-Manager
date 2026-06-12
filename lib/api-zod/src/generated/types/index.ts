@@ -14,6 +14,7 @@ export * from './clearConversationSuccess';
 export * from './conversationEnvelope';
 export * from './conversationMessage';
 export * from './conversationMessageRole';
+export * from './deleteAccountSuccess';
 export * from './errorEnvelope';
 export * from './handleBrowserLoginCallbackParams';
 export * from './healthStatus';

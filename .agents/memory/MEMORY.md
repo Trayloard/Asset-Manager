@@ -1,0 +1,1 @@
+- [Voice on Expo mobile](voice-on-expo.md) — record with expo-audio + base64 to your own OpenAI STT/TTS endpoints; MediaRecorder web libs don't work in RN; native-first, web degrades.

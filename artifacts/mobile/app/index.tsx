@@ -1,6 +1,7 @@
 import React, { useRef } from "react";
 import {
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
@@ -10,6 +11,7 @@ import {
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ChatInput } from "@/components/ChatInput";
 import { Creature } from "@/components/Creature";
@@ -17,12 +19,18 @@ import { DynamicIsland } from "@/components/DynamicIsland";
 import { MessageBubble } from "@/components/MessageBubble";
 import { useCompanion, Message } from "@/context/CompanionContext";
 import { useColors } from "@/hooks/useColors";
+import { useAuth } from "@/lib/auth";
 
 export default function HomeScreen() {
   const { messages, creatureState, companionName, isStreaming, sendMessage, clearMessages } =
     useCompanion();
   const colors = useColors();
+  const { user, logout } = useAuth();
+  const router = useRouter();
   const listRef = useRef<FlatList<Message>>(null);
+
+  const firstName = user?.firstName?.trim() || null;
+  const initial = (firstName || user?.email || "?").charAt(0).toUpperCase();
 
   const handleSend = (text: string) => {
     sendMessage(text);
@@ -53,14 +61,39 @@ export default function HomeScreen() {
       <DynamicIsland state={creatureState} companionName={companionName} />
 
       <View style={[styles.headerRow, { borderBottomColor: colors.border }]}>
-        <Text style={[styles.headerTitle, { color: colors.foreground }]}>
-          Conversation
-        </Text>
-        {messages.length > 0 && (
-          <TouchableOpacity onPress={handleClear} style={styles.clearBtn}>
-            <Feather name="trash-2" size={16} color={colors.mutedForeground} />
+        <TouchableOpacity
+          style={styles.userInfo}
+          onPress={() => router.push("/profile")}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Open profile"
+        >
+          {user?.profileImageUrl ? (
+            <Image
+              source={{ uri: user.profileImageUrl }}
+              style={[styles.avatar, { backgroundColor: colors.muted }]}
+            />
+          ) : (
+            <View style={[styles.avatar, styles.avatarFallback, { backgroundColor: colors.muted }]}>
+              <Text style={[styles.avatarInitial, { color: colors.mutedForeground }]}>
+                {initial}
+              </Text>
+            </View>
+          )}
+          <Text style={[styles.userName, { color: colors.foreground }]} numberOfLines={1}>
+            {firstName ? `Hi, ${firstName}` : "Welcome"}
+          </Text>
+        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          {messages.length > 0 && (
+            <TouchableOpacity onPress={handleClear} style={styles.clearBtn}>
+              <Feather name="trash-2" size={16} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity onPress={logout} style={styles.clearBtn}>
+            <Feather name="log-out" size={16} color={colors.mutedForeground} />
           </TouchableOpacity>
-        )}
+        </View>
       </View>
 
       <KeyboardAvoidingView
@@ -103,12 +136,34 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  headerTitle: {
-    fontSize: 13,
+  userInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flex: 1,
+  },
+  avatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+  },
+  avatarFallback: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarInitial: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  userName: {
+    fontSize: 15,
     fontWeight: "600",
-    letterSpacing: 1,
-    textTransform: "uppercase",
-    opacity: 0.5,
+    flexShrink: 1,
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
   },
   clearBtn: {
     padding: 4,

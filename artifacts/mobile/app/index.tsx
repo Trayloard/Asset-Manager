@@ -3,7 +3,7 @@ import type { Message } from "@workspace/api-client-react";
 import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
 import { StatusBar } from "expo-status-bar";
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AmbientGlow } from "@/components/AmbientGlow";
 import { ChatInput } from "@/components/ChatInput";
 import { CompanionOrb } from "@/components/CompanionOrb";
+import { InnerSelfSheet } from "@/components/InnerSelfSheet";
 import { MessageBubble, RetryBubble, TypingBubble } from "@/components/MessageBubble";
 import { FONTS } from "@/constants/fonts";
 import { useCompanion } from "@/contexts/CompanionContext";
@@ -69,6 +70,7 @@ export default function CompanionScreen() {
     voiceEnabled,
     notificationsEnabled,
     mood,
+    conversationId,
     initializing,
     initError,
     error,
@@ -83,6 +85,8 @@ export default function CompanionScreen() {
     retryInit,
     dismissError,
   } = useCompanion();
+
+  const [peekVisible, setPeekVisible] = useState(false);
 
   const topPad = Platform.OS === "web" ? 24 : insets.top + 8;
   const bottomPad = Platform.OS === "web" ? 20 : insets.bottom + 6;
@@ -120,6 +124,13 @@ export default function CompanionScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     toggleNotifications();
+  };
+
+  const handleOpenPeek = () => {
+    if (Platform.OS !== "web") {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    setPeekVisible(true);
   };
 
   return (
@@ -185,7 +196,15 @@ export default function CompanionScreen() {
             />
           </Pressable>
 
-          <CompanionOrb status={status} mood={mood.label} size={120} />
+          <Pressable
+            onPress={handleOpenPeek}
+            testID="inner-self-button"
+            accessibilityRole="button"
+            accessibilityLabel="Peek inside Empiri"
+            hitSlop={8}
+          >
+            <CompanionOrb status={status} mood={mood.label} size={120} />
+          </Pressable>
           <Text style={[styles.name, { color: colors.foreground }]}>Empiri</Text>
           <Text style={[styles.status, { color: colors.statusAccent }]}>
             {statusLabel(status, mood.label)}
@@ -277,6 +296,12 @@ export default function CompanionScreen() {
           />
         </View>
       </KeyboardAvoidingView>
+
+      <InnerSelfSheet
+        visible={peekVisible}
+        conversationId={conversationId}
+        onClose={() => setPeekVisible(false)}
+      />
     </View>
   );
 }

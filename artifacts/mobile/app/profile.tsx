@@ -143,6 +143,34 @@ export default function ProfileScreen() {
           </Text>
         </View>
 
+        <TouchableOpacity
+          onPress={() => router.push("/companion-settings")}
+          activeOpacity={0.85}
+          style={[
+            styles.linkRow,
+            { backgroundColor: colors.card, borderColor: colors.border },
+          ]}
+        >
+          <View style={styles.linkIcon}>
+            <Feather name="heart" size={20} color={colors.primary} />
+          </View>
+          <View style={styles.linkText}>
+            <Text style={[styles.linkTitle, { color: colors.foreground }]}>
+              Companion settings
+            </Text>
+            <Text
+              style={[styles.linkSubtitle, { color: colors.mutedForeground }]}
+            >
+              Name and personalize your companion
+            </Text>
+          </View>
+          <Feather
+            name="chevron-right"
+            size={20}
+            color={colors.mutedForeground}
+          />
+        </TouchableOpacity>
+
         <View style={styles.actions}>
           <TouchableOpacity
             onPress={handleLogout}
@@ -246,6 +274,29 @@ const styles = StyleSheet.create({
   divider: {
     height: StyleSheet.hairlineWidth,
     marginVertical: 14,
+  },
+  linkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 16,
+  },
+  linkIcon: {
+    width: 24,
+    alignItems: "center",
+  },
+  linkText: {
+    flex: 1,
+    gap: 3,
+  },
+  linkTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  linkSubtitle: {
+    fontSize: 13,
   },
   logoutBtn: {
     flexDirection: "row",

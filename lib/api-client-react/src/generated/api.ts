@@ -23,6 +23,7 @@ import type {
   AuthUserEnvelope,
   BeginBrowserLoginParams,
   ClearConversationSuccess,
+  CompanionSettingsEnvelope,
   ConversationDetailEnvelope,
   ConversationEnvelope,
   ConversationListEnvelope,
@@ -35,7 +36,8 @@ import type {
   MobileTokenExchangeRequest,
   MobileTokenExchangeSuccess,
   SaveMessageRequest,
-  SaveMessageResponse
+  SaveMessageResponse,
+  UpdateCompanionSettingsRequest
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -1026,5 +1028,153 @@ export const useDeleteAccount = <TError = ErrorType<ErrorEnvelope>,
         TContext
       > => {
       return useMutation(getDeleteAccountMutationOptions(options));
+    }
+
+export const getGetCompanionSettingsUrl = () => {
+
+
+
+
+  return `/api/companion-settings`
+}
+
+/**
+ * @summary Load the authenticated user's companion settings
+ */
+export const getCompanionSettings = async ( options?: RequestInit): Promise<CompanionSettingsEnvelope> => {
+
+  return customFetch<CompanionSettingsEnvelope>(getGetCompanionSettingsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCompanionSettingsQueryKey = () => {
+    return [
+    `/api/companion-settings`
+    ] as const;
+    }
+
+
+export const getGetCompanionSettingsQueryOptions = <TData = Awaited<ReturnType<typeof getCompanionSettings>>, TError = ErrorType<ErrorEnvelope>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCompanionSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCompanionSettingsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCompanionSettings>>> = ({ signal }) => getCompanionSettings({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCompanionSettings>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCompanionSettingsQueryResult = NonNullable<Awaited<ReturnType<typeof getCompanionSettings>>>
+export type GetCompanionSettingsQueryError = ErrorType<ErrorEnvelope>
+
+
+/**
+ * @summary Load the authenticated user's companion settings
+ */
+
+export function useGetCompanionSettings<TData = Awaited<ReturnType<typeof getCompanionSettings>>, TError = ErrorType<ErrorEnvelope>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCompanionSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCompanionSettingsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getUpdateCompanionSettingsUrl = () => {
+
+
+
+
+  return `/api/companion-settings`
+}
+
+/**
+ * @summary Update the authenticated user's companion settings
+ */
+export const updateCompanionSettings = async (updateCompanionSettingsRequest: UpdateCompanionSettingsRequest, options?: RequestInit): Promise<CompanionSettingsEnvelope> => {
+
+  return customFetch<CompanionSettingsEnvelope>(getUpdateCompanionSettingsUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      updateCompanionSettingsRequest,)
+  }
+);}
+
+
+
+
+export const getUpdateCompanionSettingsMutationOptions = <TError = ErrorType<ErrorEnvelope>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCompanionSettings>>, TError,{data: BodyType<UpdateCompanionSettingsRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateCompanionSettings>>, TError,{data: BodyType<UpdateCompanionSettingsRequest>}, TContext> => {
+
+const mutationKey = ['updateCompanionSettings'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateCompanionSettings>>, {data: BodyType<UpdateCompanionSettingsRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateCompanionSettings(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateCompanionSettingsMutationResult = NonNullable<Awaited<ReturnType<typeof updateCompanionSettings>>>
+    export type UpdateCompanionSettingsMutationBody = BodyType<UpdateCompanionSettingsRequest>
+    export type UpdateCompanionSettingsMutationError = ErrorType<ErrorEnvelope>
+
+    /**
+ * @summary Update the authenticated user's companion settings
+ */
+export const useUpdateCompanionSettings = <TError = ErrorType<ErrorEnvelope>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCompanionSettings>>, TError,{data: BodyType<UpdateCompanionSettingsRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateCompanionSettings>>,
+        TError,
+        {data: BodyType<UpdateCompanionSettingsRequest>},
+        TContext
+      > => {
+      return useMutation(getUpdateCompanionSettingsMutationOptions(options));
     }
 

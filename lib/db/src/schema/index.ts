@@ -18,5 +18,6 @@
 //   export type Post = typeof postsTable.$inferSelect;
 
 export * from "./auth";
+export * from "./companion";
 export * from "./conversations";
 export * from "./messages";

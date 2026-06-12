@@ -47,6 +47,7 @@ function RootLayoutNav() {
       <Stack.Screen name="index" />
       <Stack.Screen name="sign-in" />
       <Stack.Screen name="profile" />
+      <Stack.Screen name="companion-settings" />
     </Stack>
   );
 }

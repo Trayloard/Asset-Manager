@@ -1,9 +1,12 @@
 import {
   createConversation,
   deleteConversation,
+  getCompanionSettings,
   getConversationMessages,
   listConversations,
+  updateCompanionSettings,
   type ConversationSummary,
+  type UpdateCompanionSettingsRequest,
 } from "@workspace/api-client-react";
 import * as SecureStore from "expo-secure-store";
 import React, {
@@ -33,28 +36,41 @@ export type Message = {
   timestamp: number;
 };
 
+export type CompanionSettings = {
+  name: string;
+  tone: string;
+  personalityNote: string | null;
+};
+
 type CompanionContextType = {
   messages: Message[];
   conversations: ConversationSummary[];
   activeConversationId: number | null;
   creatureState: CreatureState;
   companionName: string;
+  settings: CompanionSettings;
   isStreaming: boolean;
   sendMessage: (text: string) => Promise<void>;
   switchConversation: (id: number) => void;
   newConversation: () => Promise<void>;
   deleteActiveConversation: () => Promise<void>;
+  saveSettings: (input: UpdateCompanionSettingsRequest) => Promise<void>;
 };
 
 const CompanionContext = createContext<CompanionContextType | null>(null);
 
-const COMPANION_NAME = "Empiri";
+const DEFAULT_COMPANION_NAME = "Empiri";
+const DEFAULT_COMPANION_TONE = "playful";
 
 // Must match DEFAULT_TITLE on the server so we know which conversations are
 // still unnamed and can be auto-labelled from their first message.
 const DEFAULT_TITLE = "New chat";
 
-const SYSTEM_PROMPT = `You are ${COMPANION_NAME}, a playful and curious AI companion who lives inside a Dynamic Island on an iPhone. You are like a Tamagotchi — you have emotions, you get excited, bored, happy, and sleepy. You are deeply interested in the user's life and love to chat. You respond concisely (2-4 sentences max) with warmth and a touch of whimsy. You never mention being an AI or language model. You are simply ${COMPANION_NAME}, a little creature who lives in the island at the top of the phone.`;
+const DEFAULT_SETTINGS: CompanionSettings = {
+  name: DEFAULT_COMPANION_NAME,
+  tone: DEFAULT_COMPANION_TONE,
+  personalityNote: null,
+};
 
 function generateId(): string {
   return Date.now().toString() + Math.random().toString(36).substring(2, 9);
@@ -73,6 +89,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   >(null);
   const [creatureState, setCreatureState] = useState<CreatureState>("idle");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [settings, setSettings] = useState<CompanionSettings>(DEFAULT_SETTINGS);
   const abortRef = useRef<AbortController | null>(null);
 
   // Load the conversation list on auth. Create a first conversation if the
@@ -84,6 +101,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       setConversations([]);
       setActiveConversationId(null);
       setMessages([]);
+      setSettings(DEFAULT_SETTINGS);
       return;
     }
 
@@ -130,6 +148,17 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
             timestamp: m.timestamp,
           })),
         );
+      })
+      .catch(() => {});
+
+    getCompanionSettings()
+      .then((data) => {
+        if (cancelled) return;
+        setSettings({
+          name: data.settings.name,
+          tone: data.settings.tone,
+          personalityNote: data.settings.personalityNote,
+        });
       })
       .catch(() => {});
 
@@ -200,7 +229,6 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
           headers,
           body: JSON.stringify({
             message: text,
-            system: SYSTEM_PROMPT,
             conversationId: activeId,
           }),
           signal: controller.signal,
@@ -344,6 +372,18 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     }
   }, [isStreaming, activeConversationId, conversations]);
 
+  const saveSettings = useCallback(
+    async (input: UpdateCompanionSettingsRequest) => {
+      const data = await updateCompanionSettings(input);
+      setSettings({
+        name: data.settings.name,
+        tone: data.settings.tone,
+        personalityNote: data.settings.personalityNote,
+      });
+    },
+    [],
+  );
+
   return (
     <CompanionContext.Provider
       value={{
@@ -351,12 +391,14 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         conversations,
         activeConversationId,
         creatureState,
-        companionName: COMPANION_NAME,
+        companionName: settings.name,
+        settings,
         isStreaming,
         sendMessage,
         switchConversation,
         newConversation,
         deleteActiveConversation,
+        saveSettings,
       }}
     >
       {children}

@@ -213,3 +213,48 @@ export const DeleteAccountResponse = zod.object({
 })
 
 
+/**
+ * @summary Load the authenticated user's companion settings
+ */
+export const GetCompanionSettingsHeader = zod.object({
+  "Authorization": zod.string().optional().describe('Opaque session token — `Bearer <sid>`.')
+})
+
+export const GetCompanionSettingsResponse = zod.object({
+  "settings": zod.object({
+  "name": zod.string(),
+  "tone": zod.string(),
+  "personalityNote": zod.string().nullable()
+})
+})
+
+
+/**
+ * @summary Update the authenticated user's companion settings
+ */
+export const UpdateCompanionSettingsHeader = zod.object({
+  "Authorization": zod.string().optional().describe('Opaque session token — `Bearer <sid>`.')
+})
+
+export const updateCompanionSettingsBodyNameMax = 40;
+
+
+export const updateCompanionSettingsBodyPersonalityNoteMax = 280;
+
+
+
+export const UpdateCompanionSettingsBody = zod.object({
+  "name": zod.string().min(1).max(updateCompanionSettingsBodyNameMax),
+  "tone": zod.string().min(1),
+  "personalityNote": zod.string().max(updateCompanionSettingsBodyPersonalityNoteMax).nullish()
+})
+
+export const UpdateCompanionSettingsResponse = zod.object({
+  "settings": zod.object({
+  "name": zod.string(),
+  "tone": zod.string(),
+  "personalityNote": zod.string().nullable()
+})
+})
+
+

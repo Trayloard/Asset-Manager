@@ -3,12 +3,11 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { db, conversations, messages } from "@workspace/db";
 import { asc, eq } from "drizzle-orm";
 
+import { buildCompanionSystemPrompt } from "../lib/companionPrompt";
+import { getOrCreateCompanionSettings } from "./companion";
 import { DEFAULT_TITLE, getOwnedConversation } from "./conversations";
 
 const router: IRouter = Router();
-
-const DEFAULT_SYSTEM_PROMPT =
-  "You are Empiri, a playful and curious AI companion who lives inside a Dynamic Island on an iPhone. You respond concisely (2-4 sentences max) with warmth and a touch of whimsy. You never mention being an AI or language model.";
 
 router.post("/ai/chat", async (req: Request, res: Response) => {
   if (!req.isAuthenticated()) {
@@ -16,9 +15,8 @@ router.post("/ai/chat", async (req: Request, res: Response) => {
     return;
   }
 
-  const { message, system, conversationId } = req.body as {
+  const { message, conversationId } = req.body as {
     message?: unknown;
-    system?: unknown;
     conversationId?: unknown;
   };
 
@@ -40,10 +38,24 @@ router.post("/ai/chat", async (req: Request, res: Response) => {
     return;
   }
 
-  const systemPrompt =
-    typeof system === "string" && system.trim().length > 0
-      ? system
-      : DEFAULT_SYSTEM_PROMPT;
+  // Build the system prompt server-side from the authenticated user's companion
+  // settings so the client can never override the companion's identity/persona.
+  let systemPrompt = buildCompanionSystemPrompt({
+    name: "Empiri",
+    tone: "playful",
+    personalityNote: null,
+  });
+
+  try {
+    const settings = await getOrCreateCompanionSettings(req.user.id);
+    systemPrompt = buildCompanionSystemPrompt({
+      name: settings.name,
+      tone: settings.tone,
+      personalityNote: settings.personalityNote ?? null,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to load companion settings");
+  }
 
   // Persist the incoming user message first so the AI context is sourced from
   // the same persisted history the user sees (and stays coherent across

@@ -115,6 +115,32 @@ export const DeleteAccountSuccessValue = {
 } as const;
 export type DeleteAccountSuccess = typeof DeleteAccountSuccessValue;
 
+export interface CompanionSettings {
+  name: string;
+  tone: string;
+  /** @nullable */
+  personalityNote: string | null;
+}
+
+export interface CompanionSettingsEnvelope {
+  settings: CompanionSettings;
+}
+
+export interface UpdateCompanionSettingsRequest {
+  /**
+     * @minLength 1
+     * @maxLength 40
+     */
+  name: string;
+  /** @minLength 1 */
+  tone: string;
+  /**
+     * @maxLength 280
+     * @nullable
+     */
+  personalityNote?: string | null;
+}
+
 export interface ErrorEnvelope {
   error: string;
 }

@@ -11,16 +11,6 @@ import { Creature } from "@/components/Creature";
 import { CreatureState } from "@/context/CompanionContext";
 import { useColors } from "@/hooks/useColors";
 
-const STATE_LABELS: Record<CreatureState, string> = {
-  idle: "Empiri",
-  listening: "Listening...",
-  thinking: "Thinking...",
-  responding: "Speaking...",
-  happy: "Empiri  ✦",
-  sleepy: "Zzz...",
-  sad: "Hmm...",
-};
-
 const PILL_WIDTHS: Record<CreatureState, number> = {
   idle: 220,
   listening: 260,
@@ -81,6 +71,16 @@ export function DynamicIsland({ state, companionName }: Props) {
       : 12;
 
   const glowColor = STATE_GLOW[state];
+
+  const STATE_LABELS: Record<CreatureState, string> = {
+    idle: companionName,
+    listening: "Listening...",
+    thinking: "Thinking...",
+    responding: "Speaking...",
+    happy: `${companionName}  ✦`,
+    sleepy: "Zzz...",
+    sad: "Hmm...",
+  };
 
   return (
     <View

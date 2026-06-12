@@ -35,6 +35,7 @@ import { FONTS } from "@/constants/fonts";
 import { useCompanion } from "@/contexts/CompanionContext";
 import { useColors } from "@/hooks/useColors";
 import { useCompanionTraits } from "@/hooks/useCompanionTraits";
+import { useAuth } from "@/lib/auth";
 import type { MoodLabel } from "@/lib/mood";
 
 function moodLabel(mood: MoodLabel): string {
@@ -105,6 +106,8 @@ export default function CompanionScreen() {
     retryInit,
     dismissError,
   } = useCompanion();
+
+  const { isAuthenticated, isLoading: authLoading, login } = useAuth();
 
   const traits = useCompanionTraits(conversationId);
   const [peekVisible, setPeekVisible] = useState(false);
@@ -182,6 +185,36 @@ export default function CompanionScreen() {
     }
     setSettingsVisible(true);
   };
+
+  if (authLoading) {
+    return (
+      <View style={[styles.root, styles.center, { backgroundColor: colors.background }]}>
+        <ActivityIndicator color={colors.primary} />
+      </View>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <View style={[styles.root, styles.center, { backgroundColor: colors.background }]}>
+        <StatusBar style={scheme === "dark" ? "light" : "dark"} />
+        <Text style={[styles.emptyTitle, { color: colors.foreground, marginBottom: 8 }]}>
+          Welcome to Empiri
+        </Text>
+        <Text style={[styles.emptyText, { color: colors.mutedForeground, marginBottom: 32 }]}>
+          Sign in to start your conversation.
+        </Text>
+        <Pressable
+          onPress={login}
+          style={[styles.retry, { backgroundColor: colors.primary }]}
+        >
+          <Text style={[styles.retryText, { color: colors.primaryForeground }]}>
+            Sign in
+          </Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>

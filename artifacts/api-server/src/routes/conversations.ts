@@ -12,7 +12,7 @@ const router: IRouter = Router();
 
 const DEFAULT_TITLE = "Conversation";
 
-async function getOrCreateConversation(userId: string) {
+export async function getOrCreateConversation(userId: string) {
   const [existing] = await db
     .select()
     .from(conversations)

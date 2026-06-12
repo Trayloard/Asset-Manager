@@ -1,17 +1,63 @@
 import { openai } from "@workspace/integrations-openai-ai-server";
-import { Router } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
+import { db, messages } from "@workspace/db";
+import { asc, eq } from "drizzle-orm";
 
-const router = Router();
+import { getOrCreateConversation } from "./conversations";
 
-router.post("/ai/chat", async (req, res) => {
-  const { messages } = req.body as {
-    messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
-  };
+const router: IRouter = Router();
 
-  if (!Array.isArray(messages) || messages.length === 0) {
-    res.status(400).json({ error: "messages array required" });
+const DEFAULT_SYSTEM_PROMPT =
+  "You are Empiri, a playful and curious AI companion who lives inside a Dynamic Island on an iPhone. You respond concisely (2-4 sentences max) with warmth and a touch of whimsy. You never mention being an AI or language model.";
+
+router.post("/ai/chat", async (req: Request, res: Response) => {
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Not authenticated" });
     return;
   }
+
+  const { message, system } = req.body as {
+    message?: unknown;
+    system?: unknown;
+  };
+
+  if (typeof message !== "string" || message.trim().length === 0) {
+    res.status(400).json({ error: "message is required" });
+    return;
+  }
+
+  const systemPrompt =
+    typeof system === "string" && system.trim().length > 0
+      ? system
+      : DEFAULT_SYSTEM_PROMPT;
+
+  const conversation = await getOrCreateConversation(req.user.id);
+
+  // Persist the incoming user message first so the AI context is sourced from
+  // the same persisted history the user sees (and stays coherent across
+  // reloads and devices).
+  await db.insert(messages).values({
+    conversationId: conversation.id,
+    role: "user",
+    content: message,
+  });
+
+  const history = await db
+    .select()
+    .from(messages)
+    .where(eq(messages.conversationId, conversation.id))
+    .orderBy(asc(messages.createdAt), asc(messages.id));
+
+  const chatMessages: Array<{
+    role: "system" | "user" | "assistant";
+    content: string;
+  }> = [
+    { role: "system", content: systemPrompt },
+    ...history.map((m) => ({
+      role: m.role as "user" | "assistant",
+      content: m.content,
+    })),
+  ];
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -22,15 +68,28 @@ router.post("/ai/chat", async (req, res) => {
     const stream = await openai.chat.completions.create({
       model: "gpt-5.4",
       max_completion_tokens: 512,
-      messages,
+      messages: chatMessages,
       stream: true,
     });
+
+    let fullContent = "";
 
     for await (const chunk of stream) {
       const content = chunk.choices[0]?.delta?.content;
       if (content) {
+        fullContent += content;
         res.write(`data: ${JSON.stringify({ content })}\n\n`);
       }
+    }
+
+    // Persist the assistant reply only on a clean completion so a partial /
+    // failed stream never poisons future context.
+    if (fullContent) {
+      await db.insert(messages).values({
+        conversationId: conversation.id,
+        role: "assistant",
+        content: fullContent,
+      });
     }
 
     res.write(`data: ${JSON.stringify({ done: true })}\n\n`);

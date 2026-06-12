@@ -1,7 +1,6 @@
 import {
   clearConversation,
   getConversation,
-  saveConversationMessage,
 } from "@workspace/api-client-react";
 import * as SecureStore from "expo-secure-store";
 import React, {
@@ -96,7 +95,6 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
 
       const updatedMessages = [...messages, userMsg];
       setMessages(updatedMessages);
-      saveConversationMessage({ role: "user", content: text }).catch(() => {});
       setCreatureState("listening");
 
       await new Promise((r) => setTimeout(r, 400));
@@ -118,11 +116,6 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         const controller = new AbortController();
         abortRef.current = controller;
 
-        const apiMessages = updatedMessages.map((m) => ({
-          role: m.role,
-          content: m.content,
-        }));
-
         const domain = process.env["EXPO_PUBLIC_DOMAIN"];
         const baseUrl = domain ? `https://${domain}` : "";
 
@@ -132,14 +125,14 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         };
         if (token) headers["Authorization"] = `Bearer ${token}`;
 
+        // Send only the new message. The server persists it, then sources the
+        // AI context from the same persisted history shown to the user.
         const response = await fetch(`${baseUrl}/api/ai/chat`, {
           method: "POST",
           headers,
           body: JSON.stringify({
-            messages: [
-              { role: "system", content: SYSTEM_PROMPT },
-              ...apiMessages,
-            ],
+            message: text,
+            system: SYSTEM_PROMPT,
           }),
           signal: controller.signal,
         });
@@ -184,12 +177,6 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
-        if (fullContent) {
-          saveConversationMessage({
-            role: "assistant",
-            content: fullContent,
-          }).catch(() => {});
-        }
         setCreatureState("happy");
         setTimeout(() => setCreatureState("idle"), 3000);
       } catch (err) {

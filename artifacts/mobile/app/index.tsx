@@ -18,7 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ChatInput } from "@/components/ChatInput";
 import { CompanionOrb } from "@/components/CompanionOrb";
-import { MessageBubble, TypingBubble } from "@/components/MessageBubble";
+import { MessageBubble, RetryBubble, TypingBubble } from "@/components/MessageBubble";
 import { useCompanion } from "@/contexts/CompanionContext";
 import { useColors } from "@/hooks/useColors";
 import type { MoodLabel } from "@/lib/mood";
@@ -69,8 +69,10 @@ export default function CompanionScreen() {
     initializing,
     initError,
     error,
+    failedTurn,
     isRecording,
     sendText,
+    retryMessage,
     startListening,
     stopListening,
     toggleVoice,
@@ -94,6 +96,13 @@ export default function CompanionScreen() {
     } else {
       startListening();
     }
+  };
+
+  const handleRetry = () => {
+    if (Platform.OS !== "web") {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    retryMessage();
   };
 
   const handleToggleVoice = () => {
@@ -217,6 +226,8 @@ export default function CompanionScreen() {
               ListHeaderComponent={
                 status === "thinking" || status === "transcribing" ? (
                   <TypingBubble />
+                ) : failedTurn ? (
+                  <RetryBubble onRetry={handleRetry} />
                 ) : null
               }
               contentContainerStyle={styles.listContent}

@@ -1,5 +1,6 @@
+import { Feather } from "@expo/vector-icons";
 import React, { useEffect } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, {
   Easing,
   cancelAnimation,
@@ -53,6 +54,35 @@ export function MessageBubble({ role, content }: MessageBubbleProps) {
           {content}
         </Text>
       </View>
+    </View>
+  );
+}
+
+export function RetryBubble({ onRetry }: { onRetry: () => void }) {
+  const colors = useColors();
+  return (
+    <View style={[styles.row, { justifyContent: "flex-start" }]}>
+      <Pressable
+        onPress={onRetry}
+        testID="retry-button"
+        accessibilityRole="button"
+        accessibilityLabel="Try again"
+        hitSlop={6}
+        style={({ pressed }) => [
+          styles.bubble,
+          styles.retry,
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            opacity: pressed ? 0.7 : 1,
+          },
+        ]}
+      >
+        <Feather name="rotate-ccw" size={15} color={colors.primary} />
+        <Text style={[styles.retryText, { color: colors.primary }]}>
+          Try again
+        </Text>
+      </Pressable>
     </View>
   );
 }
@@ -133,6 +163,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 5,
     paddingVertical: 15,
+  },
+  retry: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    borderWidth: 1,
+    borderBottomLeftRadius: 6,
+  },
+  retryText: {
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
   },
   dot: {
     width: 8,

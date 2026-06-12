@@ -1,5 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import type { Message } from "@workspace/api-client-react";
+import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
 import { StatusBar } from "expo-status-bar";
 import React, { useMemo } from "react";
@@ -16,9 +17,11 @@ import {
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { AmbientGlow } from "@/components/AmbientGlow";
 import { ChatInput } from "@/components/ChatInput";
 import { CompanionOrb } from "@/components/CompanionOrb";
 import { MessageBubble, RetryBubble, TypingBubble } from "@/components/MessageBubble";
+import { FONTS } from "@/constants/fonts";
 import { useCompanion } from "@/contexts/CompanionContext";
 import { useColors } from "@/hooks/useColors";
 import type { MoodLabel } from "@/lib/mood";
@@ -122,6 +125,7 @@ export default function CompanionScreen() {
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
       <StatusBar style={scheme === "dark" ? "light" : "dark"} />
+      <AmbientGlow status={status} />
       <KeyboardAvoidingView
         style={styles.flex}
         behavior="padding"
@@ -134,20 +138,24 @@ export default function CompanionScreen() {
             style={({ pressed }) => [
               styles.notifToggle,
               {
-                backgroundColor: notificationsEnabled
-                  ? colors.secondary
-                  : colors.muted,
+                backgroundColor: colors.glass,
+                borderColor: colors.glassBorder,
                 opacity: pressed ? 0.7 : 1,
               },
             ]}
             testID="notifications-toggle"
             hitSlop={8}
           >
+            <BlurView
+              intensity={24}
+              tint={colors.blurTint}
+              style={StyleSheet.absoluteFill}
+            />
             <Feather
               name={notificationsEnabled ? "bell" : "bell-off"}
               size={18}
               color={
-                notificationsEnabled ? colors.primary : colors.mutedForeground
+                notificationsEnabled ? colors.statusAccent : colors.mutedForeground
               }
             />
           </Pressable>
@@ -157,23 +165,29 @@ export default function CompanionScreen() {
             style={({ pressed }) => [
               styles.voiceToggle,
               {
-                backgroundColor: voiceEnabled ? colors.secondary : colors.muted,
+                backgroundColor: colors.glass,
+                borderColor: colors.glassBorder,
                 opacity: pressed ? 0.7 : 1,
               },
             ]}
             testID="voice-toggle"
             hitSlop={8}
           >
+            <BlurView
+              intensity={24}
+              tint={colors.blurTint}
+              style={StyleSheet.absoluteFill}
+            />
             <Feather
               name={voiceEnabled ? "volume-2" : "volume-x"}
               size={18}
-              color={voiceEnabled ? colors.primary : colors.mutedForeground}
+              color={voiceEnabled ? colors.statusAccent : colors.mutedForeground}
             />
           </Pressable>
 
           <CompanionOrb status={status} mood={mood.label} size={120} />
           <Text style={[styles.name, { color: colors.foreground }]}>Empiri</Text>
-          <Text style={[styles.status, { color: colors.mutedForeground }]}>
+          <Text style={[styles.status, { color: colors.statusAccent }]}>
             {statusLabel(status, mood.label)}
           </Text>
         </View>
@@ -277,32 +291,37 @@ const styles = StyleSheet.create({
   voiceToggle: {
     position: "absolute",
     right: 18,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
-    zIndex: 1,
+    overflow: "hidden",
+    zIndex: 2,
   },
   notifToggle: {
     position: "absolute",
     left: 18,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
-    zIndex: 1,
+    overflow: "hidden",
+    zIndex: 2,
   },
   name: {
-    fontSize: 24,
-    fontFamily: "Inter_700Bold",
-    marginTop: 2,
+    fontSize: 26,
+    fontFamily: FONTS.bold,
+    letterSpacing: -0.4,
+    marginTop: 4,
   },
   status: {
     fontSize: 14,
-    fontFamily: "Inter_500Medium",
-    marginTop: 2,
+    fontFamily: FONTS.medium,
+    marginTop: 3,
   },
   center: {
     flex: 1,
@@ -312,14 +331,15 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   emptyTitle: {
-    fontSize: 20,
-    fontFamily: "Inter_600SemiBold",
+    fontSize: 21,
+    fontFamily: FONTS.bold,
+    letterSpacing: -0.3,
   },
   emptyText: {
     fontSize: 15,
     lineHeight: 21,
     textAlign: "center",
-    fontFamily: "Inter_400Regular",
+    fontFamily: FONTS.regular,
   },
   retry: {
     marginTop: 6,
@@ -329,7 +349,7 @@ const styles = StyleSheet.create({
   },
   retryText: {
     fontSize: 15,
-    fontFamily: "Inter_600SemiBold",
+    fontFamily: FONTS.semibold,
   },
   listContent: {
     paddingVertical: 12,
@@ -348,6 +368,6 @@ const styles = StyleSheet.create({
     flex: 1,
     color: "#fff",
     fontSize: 13.5,
-    fontFamily: "Inter_500Medium",
+    fontFamily: FONTS.medium,
   },
 });

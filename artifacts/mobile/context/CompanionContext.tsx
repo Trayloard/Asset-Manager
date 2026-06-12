@@ -1,4 +1,8 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import {
+  clearConversation,
+  getConversation,
+  saveConversationMessage,
+} from "@workspace/api-client-react";
 import * as SecureStore from "expo-secure-store";
 import React, {
   createContext,
@@ -9,7 +13,7 @@ import React, {
   useState,
 } from "react";
 
-import { AUTH_TOKEN_KEY } from "@/lib/auth";
+import { AUTH_TOKEN_KEY, useAuth } from "@/lib/auth";
 
 export type CreatureState =
   | "idle"
@@ -37,7 +41,6 @@ type CompanionContextType = {
 
 const CompanionContext = createContext<CompanionContextType | null>(null);
 
-const STORAGE_KEY = "companion_messages";
 const COMPANION_NAME = "Empiri";
 
 const SYSTEM_PROMPT = `You are ${COMPANION_NAME}, a playful and curious AI companion who lives inside a Dynamic Island on an iPhone. You are like a Tamagotchi — you have emotions, you get excited, bored, happy, and sleepy. You are deeply interested in the user's life and love to chat. You respond concisely (2-4 sentences max) with warmth and a touch of whimsy. You never mention being an AI or language model. You are simply ${COMPANION_NAME}, a little creature who lives in the island at the top of the phone.`;
@@ -47,26 +50,38 @@ function generateId(): string {
 }
 
 export function CompanionProvider({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [creatureState, setCreatureState] = useState<CreatureState>("idle");
   const [isStreaming, setIsStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    AsyncStorage.getItem(STORAGE_KEY).then((stored) => {
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored) as Message[];
-          setMessages(parsed);
-        } catch {
-        }
-      }
-    });
-  }, []);
+    let cancelled = false;
 
-  const persistMessages = useCallback((msgs: Message[]) => {
-    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(msgs)).catch(() => {});
-  }, []);
+    if (!isAuthenticated) {
+      setMessages([]);
+      return;
+    }
+
+    getConversation()
+      .then((data) => {
+        if (cancelled) return;
+        setMessages(
+          data.messages.map((m) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            timestamp: m.timestamp,
+          })),
+        );
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated]);
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -81,7 +96,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
 
       const updatedMessages = [...messages, userMsg];
       setMessages(updatedMessages);
-      persistMessages(updatedMessages);
+      saveConversationMessage({ role: "user", content: text }).catch(() => {});
       setCreatureState("listening");
 
       await new Promise((r) => setTimeout(r, 400));
@@ -169,10 +184,12 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
-        const finalMessages = withAssistant.map((m) =>
-          m.id === assistantId ? { ...m, content: fullContent } : m
-        );
-        persistMessages(finalMessages);
+        if (fullContent) {
+          saveConversationMessage({
+            role: "assistant",
+            content: fullContent,
+          }).catch(() => {});
+        }
         setCreatureState("happy");
         setTimeout(() => setCreatureState("idle"), 3000);
       } catch (err) {
@@ -192,12 +209,12 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         setIsStreaming(false);
       }
     },
-    [messages, isStreaming, persistMessages]
+    [messages, isStreaming]
   );
 
   const clearMessages = useCallback(() => {
     setMessages([]);
-    AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});
+    clearConversation().catch(() => {});
     setCreatureState("happy");
     setTimeout(() => setCreatureState("idle"), 2000);
   }, []);

@@ -47,6 +47,49 @@ export const LogoutSuccessValue = {
 } as const;
 export type LogoutSuccess = typeof LogoutSuccessValue;
 
+export type ConversationMessageRole = typeof ConversationMessageRole[keyof typeof ConversationMessageRole];
+
+
+export const ConversationMessageRole = {
+  user: 'user',
+  assistant: 'assistant',
+} as const;
+
+export interface ConversationMessage {
+  id: string;
+  role: ConversationMessageRole;
+  content: string;
+  /** Unix timestamp in milliseconds. */
+  timestamp: number;
+}
+
+export interface ConversationEnvelope {
+  messages: ConversationMessage[];
+}
+
+export type SaveMessageRequestRole = typeof SaveMessageRequestRole[keyof typeof SaveMessageRequestRole];
+
+
+export const SaveMessageRequestRole = {
+  user: 'user',
+  assistant: 'assistant',
+} as const;
+
+export interface SaveMessageRequest {
+  role: SaveMessageRequestRole;
+  /** @minLength 1 */
+  content: string;
+}
+
+export interface SaveMessageResponse {
+  message: ConversationMessage;
+}
+
+export const ClearConversationSuccessValue = {
+  success: true,
+} as const;
+export type ClearConversationSuccess = typeof ClearConversationSuccessValue;
+
 export interface ErrorEnvelope {
   error: string;
 }

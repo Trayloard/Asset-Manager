@@ -22,12 +22,16 @@ import type {
 import type {
   AuthUserEnvelope,
   BeginBrowserLoginParams,
+  ClearConversationSuccess,
+  ConversationEnvelope,
   ErrorEnvelope,
   HandleBrowserLoginCallbackParams,
   HealthStatus,
   LogoutSuccess,
   MobileTokenExchangeRequest,
-  MobileTokenExchangeSuccess
+  MobileTokenExchangeSuccess,
+  SaveMessageRequest,
+  SaveMessageResponse
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -581,5 +585,223 @@ export const useLogoutMobileSession = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getLogoutMobileSessionMutationOptions(options));
+    }
+
+export const getGetConversationUrl = () => {
+
+
+
+
+  return `/api/conversation`
+}
+
+/**
+ * @summary Load the authenticated user's conversation history
+ */
+export const getConversation = async ( options?: RequestInit): Promise<ConversationEnvelope> => {
+
+  return customFetch<ConversationEnvelope>(getGetConversationUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetConversationQueryKey = () => {
+    return [
+    `/api/conversation`
+    ] as const;
+    }
+
+
+export const getGetConversationQueryOptions = <TData = Awaited<ReturnType<typeof getConversation>>, TError = ErrorType<ErrorEnvelope>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getConversation>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetConversationQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getConversation>>> = ({ signal }) => getConversation({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getConversation>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetConversationQueryResult = NonNullable<Awaited<ReturnType<typeof getConversation>>>
+export type GetConversationQueryError = ErrorType<ErrorEnvelope>
+
+
+/**
+ * @summary Load the authenticated user's conversation history
+ */
+
+export function useGetConversation<TData = Awaited<ReturnType<typeof getConversation>>, TError = ErrorType<ErrorEnvelope>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getConversation>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetConversationQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getClearConversationUrl = () => {
+
+
+
+
+  return `/api/conversation`
+}
+
+/**
+ * @summary Delete the authenticated user's conversation history
+ */
+export const clearConversation = async ( options?: RequestInit): Promise<ClearConversationSuccess> => {
+
+  return customFetch<ClearConversationSuccess>(getClearConversationUrl(),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getClearConversationMutationOptions = <TError = ErrorType<ErrorEnvelope>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearConversation>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof clearConversation>>, TError,void, TContext> => {
+
+const mutationKey = ['clearConversation'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof clearConversation>>, void> = () => {
+
+
+          return  clearConversation(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ClearConversationMutationResult = NonNullable<Awaited<ReturnType<typeof clearConversation>>>
+
+    export type ClearConversationMutationError = ErrorType<ErrorEnvelope>
+
+    /**
+ * @summary Delete the authenticated user's conversation history
+ */
+export const useClearConversation = <TError = ErrorType<ErrorEnvelope>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearConversation>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof clearConversation>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getClearConversationMutationOptions(options));
+    }
+
+export const getSaveConversationMessageUrl = () => {
+
+
+
+
+  return `/api/conversation/messages`
+}
+
+/**
+ * @summary Append a message to the authenticated user's conversation
+ */
+export const saveConversationMessage = async (saveMessageRequest: SaveMessageRequest, options?: RequestInit): Promise<SaveMessageResponse> => {
+
+  return customFetch<SaveMessageResponse>(getSaveConversationMessageUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveMessageRequest,)
+  }
+);}
+
+
+
+
+export const getSaveConversationMessageMutationOptions = <TError = ErrorType<ErrorEnvelope>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveConversationMessage>>, TError,{data: BodyType<SaveMessageRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveConversationMessage>>, TError,{data: BodyType<SaveMessageRequest>}, TContext> => {
+
+const mutationKey = ['saveConversationMessage'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveConversationMessage>>, {data: BodyType<SaveMessageRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveConversationMessage(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveConversationMessageMutationResult = NonNullable<Awaited<ReturnType<typeof saveConversationMessage>>>
+    export type SaveConversationMessageMutationBody = BodyType<SaveMessageRequest>
+    export type SaveConversationMessageMutationError = ErrorType<ErrorEnvelope>
+
+    /**
+ * @summary Append a message to the authenticated user's conversation
+ */
+export const useSaveConversationMessage = <TError = ErrorType<ErrorEnvelope>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveConversationMessage>>, TError,{data: BodyType<SaveMessageRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveConversationMessage>>,
+        TError,
+        {data: BodyType<SaveMessageRequest>},
+        TContext
+      > => {
+      return useMutation(getSaveConversationMessageMutationOptions(options));
     }
 

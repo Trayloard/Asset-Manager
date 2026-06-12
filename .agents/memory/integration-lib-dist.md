@@ -33,4 +33,4 @@ dist is present in the tree but absent from `git ls-files`). A restore that only
 back source will always be missing dist until rebuilt.
 
 **How to apply:** after restoring or adding any `lib/*` composite package, run `tsc -b`
-on it before trusting the downstream `typecheck` gate.
+on it before trusting the downstream `typecheck` gate

@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as SecureStore from "expo-secure-store";
 import React, {
   createContext,
   useCallback,
@@ -7,6 +8,8 @@ import React, {
   useRef,
   useState,
 } from "react";
+
+import { AUTH_TOKEN_KEY } from "@/lib/auth";
 
 export type CreatureState =
   | "idle"
@@ -108,9 +111,15 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         const domain = process.env["EXPO_PUBLIC_DOMAIN"];
         const baseUrl = domain ? `https://${domain}` : "";
 
+        const token = await SecureStore.getItemAsync(AUTH_TOKEN_KEY);
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+        };
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+
         const response = await fetch(`${baseUrl}/api/ai/chat`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({
             messages: [
               { role: "system", content: SYSTEM_PROMPT },

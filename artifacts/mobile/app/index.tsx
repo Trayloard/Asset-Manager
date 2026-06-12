@@ -17,11 +17,13 @@ import { DynamicIsland } from "@/components/DynamicIsland";
 import { MessageBubble } from "@/components/MessageBubble";
 import { useCompanion, Message } from "@/context/CompanionContext";
 import { useColors } from "@/hooks/useColors";
+import { useAuth } from "@/lib/auth";
 
 export default function HomeScreen() {
   const { messages, creatureState, companionName, isStreaming, sendMessage, clearMessages } =
     useCompanion();
   const colors = useColors();
+  const { logout } = useAuth();
   const listRef = useRef<FlatList<Message>>(null);
 
   const handleSend = (text: string) => {
@@ -56,11 +58,16 @@ export default function HomeScreen() {
         <Text style={[styles.headerTitle, { color: colors.foreground }]}>
           Conversation
         </Text>
-        {messages.length > 0 && (
-          <TouchableOpacity onPress={handleClear} style={styles.clearBtn}>
-            <Feather name="trash-2" size={16} color={colors.mutedForeground} />
+        <View style={styles.headerActions}>
+          {messages.length > 0 && (
+            <TouchableOpacity onPress={handleClear} style={styles.clearBtn}>
+              <Feather name="trash-2" size={16} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity onPress={logout} style={styles.clearBtn}>
+            <Feather name="log-out" size={16} color={colors.mutedForeground} />
           </TouchableOpacity>
-        )}
+        </View>
       </View>
 
       <KeyboardAvoidingView
@@ -109,6 +116,11 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     textTransform: "uppercase",
     opacity: 0.5,
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
   },
   clearBtn: {
     padding: 4,

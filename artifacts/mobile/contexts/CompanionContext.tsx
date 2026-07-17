@@ -315,26 +315,10 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       }
 
       let history: Message[] = [];
-      const storedId = await AsyncStorage.getItem(CONVERSATION_KEY);
-      if (storedId) {
-        const id = Number(storedId);
-        conversationIdRef.current = id;
-        setConversationId(id);
-        history = await listMessages(id);
-        setMessages(history);
-        // Load the persisted title so a rename survives app restarts.
-        // Best-effort: a failure here must not block the chat.
-        try {
-          const conversation = await getConversation(id);
-          setConversationTitle(conversation.title);
-        } catch {
-          // keep the default title
-        }
-      } else {
-        // No locally stored conversation (fresh install or new device).
-        // Resume the account's existing conversation if one exists so chat
-        // history follows the user across devices; only create a new one
-        // when the account has none yet.
+
+      // Helper: resume or create from the server (used both on fresh install
+      // and as a fallback when the locally stored ID turns out to be stale).
+      const resumeOrCreate = async () => {
         const owned = await listConversations();
         if (owned.length > 0) {
           const conversation = owned[0];
@@ -352,6 +336,52 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
           await AsyncStorage.setItem(CONVERSATION_KEY, String(conversation.id));
           setMessages([]);
         }
+      };
+
+      const storedId = await AsyncStorage.getItem(CONVERSATION_KEY);
+      if (storedId) {
+        const id = Number(storedId);
+        let stale = false;
+        try {
+          conversationIdRef.current = id;
+          setConversationId(id);
+          history = await listMessages(id);
+          setMessages(history);
+          // Load the persisted title so a rename survives app restarts.
+          // Best-effort: a failure here must not block the chat.
+          try {
+            const conversation = await getConversation(id);
+            setConversationTitle(conversation.title);
+          } catch {
+            // keep the default title
+          }
+        } catch (err) {
+          // If the stored conversation no longer exists on the server (e.g.
+          // the account changed or it was deleted), fall back gracefully.
+          if (
+            typeof err === "object" &&
+            err !== null &&
+            "status" in err &&
+            (err as { status: number }).status === 404
+          ) {
+            stale = true;
+            await AsyncStorage.removeItem(CONVERSATION_KEY);
+            conversationIdRef.current = null;
+            setConversationId(null);
+          } else {
+            throw err;
+          }
+        }
+        if (stale) {
+          // Resume or create a fresh conversation via the server.
+          await resumeOrCreate();
+        }
+      } else {
+        // No locally stored conversation (fresh install or new device).
+        // Resume the account's existing conversation if one exists so chat
+        // history follows the user across devices; only create a new one
+        // when the account has none yet.
+        await resumeOrCreate();
       }
 
       setInitializing(false);

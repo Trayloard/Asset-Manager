@@ -12,6 +12,12 @@ import {
 } from "@workspace/api-client-react";
 
 import { CompanionProvider, useCompanion } from "../CompanionContext";
+import { DEFAULT_CADENCE } from "@/lib/mood";
+import {
+  cancelNudges,
+  requestNotificationPermission,
+  scheduleNudge,
+} from "@/lib/notifications";
 
 /**
  * Regression coverage for the bug where a failed AI reply silently showed an
@@ -58,6 +64,29 @@ jest.mock("expo-file-system/legacy", () => ({
   deleteAsync: jest.fn().mockResolvedValue(undefined),
 }));
 
+// The provider only initializes once auth has resolved; without an
+// AuthProvider in the test tree the default context stays loading forever.
+// Present a signed-in, settled auth state so the companion can boot.
+jest.mock("@/lib/auth", () => ({
+  useAuth: () => ({
+    user: { id: "test-user" },
+    isLoading: false,
+    isAuthenticated: true,
+    login: jest.fn(),
+    logout: jest.fn().mockResolvedValue(undefined),
+  }),
+}));
+
+// Mock the notification helpers directly so the bell <-> cadence tests can
+// drive permission grant/denial deterministically and assert on nudge
+// scheduling/cancellation without touching native modules.
+jest.mock("@/lib/notifications", () => ({
+  cancelNudges: jest.fn().mockResolvedValue(undefined),
+  requestNotificationPermission: jest.fn().mockResolvedValue(true),
+  scheduleNudge: jest.fn().mockResolvedValue(undefined),
+  scheduleNudgeInSeconds: jest.fn().mockResolvedValue(undefined),
+}));
+
 // Notifications are best-effort and pull in native modules; stub them.
 jest.mock("expo-notifications", () => ({
   setNotificationHandler: jest.fn(),
@@ -72,10 +101,17 @@ jest.mock("expo-notifications", () => ({
 jest.mock("@workspace/api-client-react", () => ({
   companionCheckIn: jest.fn(),
   createConversation: jest.fn(),
+  devRegressSelf: jest.fn(),
+  fetchStream: jest.fn(),
+  getCompanionSettings: jest.fn().mockRejectedValue(new Error("not mocked")),
+  getConversation: jest.fn().mockRejectedValue(new Error("not mocked")),
+  listConversations: jest.fn().mockResolvedValue([]),
   listMessages: jest.fn(),
+  renameConversation: jest.fn(),
   sendMessage: jest.fn(),
   synthesizeSpeech: jest.fn(),
   transcribeAudio: jest.fn(),
+  updateCompanionSettings: jest.fn(),
 }));
 
 const mockCreateConversation =
@@ -363,5 +399,146 @@ describe("CompanionContext proactive check-in", () => {
     await renderReadyCompanion();
 
     expect(mockCompanionCheckIn).not.toHaveBeenCalled();
+  });
+});
+
+describe("CompanionContext bell <-> check-in cadence coupling", () => {
+  const mockRequestPermission =
+    requestNotificationPermission as jest.MockedFunction<
+      typeof requestNotificationPermission
+    >;
+  const mockCancelNudges = cancelNudges as jest.MockedFunction<
+    typeof cancelNudges
+  >;
+  const mockScheduleNudge = scheduleNudge as jest.MockedFunction<
+    typeof scheduleNudge
+  >;
+
+  beforeEach(() => {
+    mockRequestPermission.mockResolvedValue(true);
+    mockCancelNudges.mockResolvedValue(undefined);
+    mockScheduleNudge.mockResolvedValue(undefined);
+  });
+
+  async function renderWithBellOn() {
+    const utils = await renderReadyCompanion();
+    await act(async () => {
+      await utils.result.current.toggleNotifications();
+    });
+    expect(utils.result.current.notificationsEnabled).toBe(true);
+    return utils;
+  }
+
+  it("setting cadence to Off cancels nudges and turns the bell off", async () => {
+    const { result } = await renderWithBellOn();
+    mockCancelNudges.mockClear();
+
+    await act(async () => {
+      await result.current.setCheckInCadence("off");
+    });
+
+    expect(result.current.checkInCadence).toBe("off");
+    expect(result.current.notificationsEnabled).toBe(false);
+    expect(mockCancelNudges).toHaveBeenCalled();
+    // The bell-off choice is persisted so it survives a restart.
+    expect(await AsyncStorage.getItem("empiri.notificationsEnabled")).toBe(
+      "false",
+    );
+    expect(await AsyncStorage.getItem("empiri.checkInCadence")).toBe("off");
+  });
+
+  it("setting cadence to Off cancels nudges even when the bell was already off", async () => {
+    const { result } = await renderReadyCompanion();
+    expect(result.current.notificationsEnabled).toBe(false);
+    mockCancelNudges.mockClear();
+
+    await act(async () => {
+      await result.current.setCheckInCadence("off");
+    });
+
+    expect(result.current.checkInCadence).toBe("off");
+    expect(result.current.notificationsEnabled).toBe(false);
+    expect(mockCancelNudges).toHaveBeenCalled();
+  });
+
+  it("turning the bell on while cadence is Off restores the default cadence and schedules a nudge", async () => {
+    const { result } = await renderReadyCompanion();
+
+    await act(async () => {
+      await result.current.setCheckInCadence("off");
+    });
+    expect(result.current.checkInCadence).toBe("off");
+    mockScheduleNudge.mockClear();
+
+    await act(async () => {
+      await result.current.toggleNotifications();
+    });
+
+    expect(result.current.notificationsEnabled).toBe(true);
+    expect(result.current.checkInCadence).toBe(DEFAULT_CADENCE);
+    // The restored cadence is persisted, and a nudge is armed at its interval.
+    expect(await AsyncStorage.getItem("empiri.checkInCadence")).toBe(
+      DEFAULT_CADENCE,
+    );
+    expect(mockScheduleNudge).toHaveBeenCalled();
+  });
+
+  it("turning the bell on with a real cadence keeps that cadence unchanged", async () => {
+    const { result } = await renderReadyCompanion();
+
+    await act(async () => {
+      await result.current.setCheckInCadence("daily");
+    });
+
+    await act(async () => {
+      await result.current.toggleNotifications();
+    });
+
+    expect(result.current.notificationsEnabled).toBe(true);
+    expect(result.current.checkInCadence).toBe("daily");
+  });
+
+  it("turning the bell off leaves the cadence untouched", async () => {
+    const { result } = await renderWithBellOn();
+
+    await act(async () => {
+      await result.current.setCheckInCadence("daily");
+    });
+    expect(result.current.checkInCadence).toBe("daily");
+    mockCancelNudges.mockClear();
+
+    // Bell off.
+    await act(async () => {
+      await result.current.toggleNotifications();
+    });
+
+    expect(result.current.notificationsEnabled).toBe(false);
+    expect(result.current.checkInCadence).toBe("daily");
+    expect(await AsyncStorage.getItem("empiri.checkInCadence")).toBe("daily");
+    // Pending OS nudges are cancelled so nothing fires with the bell off.
+    expect(mockCancelNudges).toHaveBeenCalled();
+  });
+
+  it("enabling the bell only mutates state after permission is granted", async () => {
+    mockRequestPermission.mockResolvedValue(false);
+    const { result } = await renderReadyCompanion();
+
+    await act(async () => {
+      await result.current.setCheckInCadence("off");
+    });
+
+    await act(async () => {
+      await result.current.toggleNotifications();
+    });
+
+    // Permission denied: nothing flips, the cadence stays off, and the user
+    // gets a hint to enable notifications in system settings.
+    expect(result.current.notificationsEnabled).toBe(false);
+    expect(result.current.checkInCadence).toBe("off");
+    expect(await AsyncStorage.getItem("empiri.notificationsEnabled")).not.toBe(
+      "true",
+    );
+    expect(mockScheduleNudge).not.toHaveBeenCalled();
+    expect(result.current.error).toMatch(/notifications/i);
   });
 });

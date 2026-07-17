@@ -21,6 +21,7 @@ import {
 import {
   CompanionCheckInBody,
   CreateConversationBody,
+  RenameConversationBody,
   SendMessageBody,
 } from "@workspace/api-zod";
 import { loadOrCreateSelf, saveSelf } from "../lib/companionSelf";
@@ -144,6 +145,47 @@ async function requireOwnedConversation(
 
   return conversation;
 }
+
+// Fetch a single conversation (id, title, createdAt) — owner only
+router.get("/conversations/:id", async (req, res) => {
+  const conversation = await requireOwnedConversation(req, res);
+  if (!conversation) return;
+
+  res.json({
+    id: conversation.id,
+    title: conversation.title,
+    createdAt: conversation.createdAt,
+  });
+});
+
+// Rename a conversation — owner only
+router.patch("/conversations/:id", async (req, res) => {
+  const conversation = await requireOwnedConversation(req, res);
+  if (!conversation) return;
+
+  const parsed = RenameConversationBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request body" });
+    return;
+  }
+  const title = parsed.data.title.trim();
+  if (!title) {
+    res.status(400).json({ error: "Title is required" });
+    return;
+  }
+
+  const [updated] = await db
+    .update(conversations)
+    .set({ title })
+    .where(eq(conversations.id, conversation.id))
+    .returning();
+
+  res.json({
+    id: updated.id,
+    title: updated.title,
+    createdAt: updated.createdAt,
+  });
+});
 
 // List messages in a conversation
 router.get("/conversations/:id/messages", async (req, res) => {

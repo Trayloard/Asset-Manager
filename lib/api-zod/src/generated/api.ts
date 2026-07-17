@@ -105,6 +105,42 @@ export const CreateConversationBody = zod.object({
 
 
 /**
+ * @summary Fetch a single conversation
+ */
+export const GetConversationParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetConversationResponse = zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Rename a conversation
+ */
+export const RenameConversationParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const renameConversationBodyTitleMax = 80;
+
+
+
+export const RenameConversationBody = zod.object({
+  "title": zod.string().min(1).max(renameConversationBodyTitleMax)
+})
+
+export const RenameConversationResponse = zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
  * @summary List messages in a conversation
  */
 export const ListMessagesParams = zod.object({

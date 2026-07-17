@@ -113,6 +113,30 @@ router.post("/conversations", async (req, res) => {
   });
 });
 
+// List the signed-in user's conversations, oldest first. Lets a fresh
+// install / second device resume the account's existing conversation instead
+// of creating a new one.
+router.get("/conversations", async (req, res) => {
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const rows = await db
+    .select()
+    .from(conversations)
+    .where(eq(conversations.ownerId, req.user.id))
+    .orderBy(asc(conversations.createdAt));
+
+  res.json(
+    rows.map((c) => ({
+      id: c.id,
+      title: c.title,
+      createdAt: c.createdAt,
+    })),
+  );
+});
+
 /**
  * Shared ownership check: look up the conversation by id and verify it belongs
  * to the authenticated caller. Returns the conversation row on success, or

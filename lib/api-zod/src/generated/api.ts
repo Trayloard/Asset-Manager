@@ -97,6 +97,18 @@ export const LogoutMobileSessionResponse = zod.object({
 
 
 /**
+ * Returns the conversations owned by the authenticated user, oldest first. Used to resume an existing conversation on a fresh install or new device.
+ * @summary List the signed-in user's conversations
+ */
+export const ListConversationsResponseItem = zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "createdAt": zod.coerce.date()
+})
+export const ListConversationsResponse = zod.array(ListConversationsResponseItem)
+
+
+/**
  * @summary Create a new conversation
  */
 export const CreateConversationBody = zod.object({

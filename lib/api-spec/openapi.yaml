@@ -147,6 +147,26 @@ paths:
               schema:
                 $ref: '#/components/schemas/LogoutSuccess'
   /conversations:
+    get:
+      operationId: listConversations
+      tags: [companion]
+      summary: List the signed-in user's conversations
+      description: Returns the conversations owned by the authenticated user, oldest first. Used to resume an existing conversation on a fresh install or new device.
+      responses:
+        "200":
+          description: The user's conversations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Conversation"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
     post:
       operationId: createConversation
       tags: [companion]

@@ -6,6 +6,7 @@ import {
   fetchStream,
   getCompanionSettings,
   getConversation,
+  listConversations,
   listMessages,
   renameConversation as apiRenameConversation,
   sendMessage,
@@ -330,12 +331,27 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
           // keep the default title
         }
       } else {
-        const conversation = await createConversation({ title: "Empiri" });
-        conversationIdRef.current = conversation.id;
-        setConversationId(conversation.id);
-        setConversationTitle(conversation.title);
-        await AsyncStorage.setItem(CONVERSATION_KEY, String(conversation.id));
-        setMessages([]);
+        // No locally stored conversation (fresh install or new device).
+        // Resume the account's existing conversation if one exists so chat
+        // history follows the user across devices; only create a new one
+        // when the account has none yet.
+        const owned = await listConversations();
+        if (owned.length > 0) {
+          const conversation = owned[0];
+          conversationIdRef.current = conversation.id;
+          setConversationId(conversation.id);
+          setConversationTitle(conversation.title);
+          await AsyncStorage.setItem(CONVERSATION_KEY, String(conversation.id));
+          history = await listMessages(conversation.id);
+          setMessages(history);
+        } else {
+          const conversation = await createConversation({ title: "Empiri" });
+          conversationIdRef.current = conversation.id;
+          setConversationId(conversation.id);
+          setConversationTitle(conversation.title);
+          await AsyncStorage.setItem(CONVERSATION_KEY, String(conversation.id));
+          setMessages([]);
+        }
       }
 
       setInitializing(false);

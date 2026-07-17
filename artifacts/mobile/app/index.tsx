@@ -146,6 +146,7 @@ export default function CompanionScreen() {
     devTriggerCheckIn,
     devScheduleNudgeSoon,
     devRegressSelf,
+    signOut,
   } = useCompanion();
 
   const { isAuthenticated, isLoading: authLoading, login } = useAuth();
@@ -262,6 +263,12 @@ export default function CompanionScreen() {
   const handlePersonalize = () => {
     setSettingsVisible(false);
     router.push("/companion-settings");
+  };
+
+  const handleSignOut = () => {
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSettingsVisible(false);
+    signOut();
   };
 
   const handleDevCheckIn = () => {
@@ -560,6 +567,7 @@ export default function CompanionScreen() {
         onClose={() => setSettingsVisible(false)}
         accent={accent}
         onPersonalize={handlePersonalize}
+        onSignOut={handleSignOut}
         onDevCheckIn={__DEV__ ? handleDevCheckIn : undefined}
         onDevNudge={__DEV__ ? handleDevNudge : undefined}
         onDevRegress={__DEV__ ? handleDevRegress : undefined}

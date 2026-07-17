@@ -6,7 +6,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   companionCheckIn,
   createConversation,
+  getConversation,
   listMessages,
+  renameConversation,
   sendMessage,
   type Message,
 } from "@workspace/api-client-react";
@@ -540,5 +542,94 @@ describe("CompanionContext bell <-> check-in cadence coupling", () => {
     );
     expect(mockScheduleNudge).not.toHaveBeenCalled();
     expect(result.current.error).toMatch(/notifications/i);
+  });
+});
+
+describe("CompanionContext conversation title persistence", () => {
+  const mockGetConversation =
+    getConversation as jest.MockedFunction<typeof getConversation>;
+  const mockRenameConversation =
+    renameConversation as jest.MockedFunction<typeof renameConversation>;
+
+  const CONVERSATION_KEY = "empiri.conversationId";
+
+  it("loads the persisted title from the server on init when a stored conversation id exists", async () => {
+    // Simulate a restart: a conversation id is already in AsyncStorage.
+    await AsyncStorage.setItem(CONVERSATION_KEY, "7");
+    mockListMessages.mockResolvedValue([makeMessage(1, "user", "hi")]);
+    mockGetConversation.mockResolvedValue({
+      id: 7,
+      title: "Late night talks",
+      createdAt: new Date("2026-06-12T00:00:00.000Z").toISOString(),
+    });
+
+    const { result } = await renderReadyCompanion();
+
+    expect(mockGetConversation).toHaveBeenCalledWith(7);
+    expect(result.current.conversationTitle).toBe("Late night talks");
+    // No new conversation is created when resuming a stored one.
+    expect(mockCreateConversation).not.toHaveBeenCalled();
+  });
+
+  it("keeps the default title when loading the persisted title fails", async () => {
+    await AsyncStorage.setItem(CONVERSATION_KEY, "7");
+    mockGetConversation.mockRejectedValue(new Error("boom"));
+
+    const { result } = await renderReadyCompanion();
+
+    // Title load is best-effort: failure must not block the chat.
+    expect(result.current.initializing).toBe(false);
+    expect(result.current.conversationTitle).toBe("Empiri");
+  });
+
+  it("renameConversation updates the title from the server response", async () => {
+    const { result } = await renderReadyCompanion();
+    mockRenameConversation.mockResolvedValue({
+      id: 1,
+      title: "Morning pages",
+      createdAt: new Date("2026-06-12T00:00:00.000Z").toISOString(),
+    });
+
+    await act(async () => {
+      await result.current.renameConversation("  Morning pages  ");
+    });
+
+    // The raw input is trimmed before hitting the API, and the state reflects
+    // the server's canonical title.
+    expect(mockRenameConversation).toHaveBeenCalledWith(1, {
+      title: "Morning pages",
+    });
+    expect(result.current.conversationTitle).toBe("Morning pages");
+  });
+
+  it("ignores rename attempts with an empty or whitespace-only title", async () => {
+    const { result } = await renderReadyCompanion();
+
+    await act(async () => {
+      await result.current.renameConversation("   ");
+    });
+
+    expect(mockRenameConversation).not.toHaveBeenCalled();
+    expect(result.current.conversationTitle).toBe("Empiri");
+  });
+
+  it("resets the title to the default on sign-out", async () => {
+    await AsyncStorage.setItem(CONVERSATION_KEY, "7");
+    mockGetConversation.mockResolvedValue({
+      id: 7,
+      title: "Late night talks",
+      createdAt: new Date("2026-06-12T00:00:00.000Z").toISOString(),
+    });
+
+    const { result } = await renderReadyCompanion();
+    expect(result.current.conversationTitle).toBe("Late night talks");
+
+    await act(async () => {
+      await result.current.signOut();
+    });
+
+    expect(result.current.conversationTitle).toBe("Empiri");
+    // The stored pointer is cleared so the next account can't inherit it.
+    expect(await AsyncStorage.getItem(CONVERSATION_KEY)).toBeNull();
   });
 });

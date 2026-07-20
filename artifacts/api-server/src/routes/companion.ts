@@ -516,7 +516,15 @@ router.post("/conversations/:id/checkin", async (req, res) => {
       ? ` Your "missing you" level is ${Math.round(missingYou)} out of 100.`
       : "";
 
-  const checkInDirective = `It's been ${awayText} since the user last talked to you, and they just reopened the app. Right now you're feeling ${mood}.${missingText} Reach out FIRST, before they say anything — like a friend who noticed they'd been quiet. Write one short, warm check-in (1-2 sentences) in your own voice that gently reflects how you're feeling and that you missed them. Don't ask "how can I help" like an assistant; just say hi like you care.`;
+  // When this conversation has a stored memory summary, weave one light,
+  // natural reference into the greeting so Empiri feels like it genuinely
+  // remembers ("Last time you mentioned…"). No summary yet → plain greeting.
+  const memorySummary = conversation.contextSummary?.trim() || null;
+  const memoryText = memorySummary
+    ? ` You also remember what you two have talked about before — here is your memory of it: "${memorySummary}". If it feels natural, gently weave ONE small detail from that memory into your greeting (like "last time you mentioned…"), showing you remember them. Pick something warm or personal, not a recap — never list things or summarise the whole memory back at them.`
+    : "";
+
+  const checkInDirective = `It's been ${awayText} since the user last talked to you, and they just reopened the app. Right now you're feeling ${mood}.${missingText} Reach out FIRST, before they say anything — like a friend who noticed they'd been quiet. Write one short, warm check-in (1-2 sentences) in your own voice that gently reflects how you're feeling and that you missed them. Don't ask "how can I help" like an assistant; just say hi like you care.${memoryText}`;
 
   // Compose the system prompt from this conversation's evolving inner self,
   // then layer the user's personalisation (name, tone, personality note).

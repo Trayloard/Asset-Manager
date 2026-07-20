@@ -75,6 +75,8 @@ interface InnerSelfSheetProps {
    * keeps today's exact colors.
    */
   warmth?: number;
+  /** The user's personalised companion name; falls back to "Empiri". */
+  companionName?: string;
 }
 
 // ── A monospace face for node labels gives the "mind map" its circuit-board
@@ -97,20 +99,20 @@ const CAT_COLOR: Record<Category, string> = {
   voice: "#5FE0C0",
 };
 
-const DRIVE_BLURB: Record<string, string> = {
-  connection: "How much Empiri is craving real back-and-forth with you.",
+const driveBlurb = (name: string): Record<string, string> => ({
+  connection: `How much ${name} is craving real back-and-forth with you.`,
   curiosity: "Its appetite for questions and wondering out loud.",
   novelty: "Its itch for fresh topics and new ground to explore.",
   expression: "Its need to open up and say what it's feeling.",
-};
+});
 
-const TRAIT_BLURB: Record<string, string> = {
-  warmth: "How tender and caring Empiri tends to be with you.",
+const traitBlurb = (name: string): Record<string, string> => ({
+  warmth: `How tender and caring ${name} tends to be with you.`,
   playfulness: "How light, teasing, and playful it likes to be.",
   curiosity: "How eagerly it leans toward the unknown.",
   openness: "How readily it welcomes new ideas and feelings.",
   calm: "How steady and unhurried it stays.",
-};
+});
 
 interface NodeDetail {
   title: string;
@@ -333,8 +335,11 @@ function groupInterests(
 function buildGraph(
   self: CompanionSelf,
   fullWidth: number,
+  name: string,
   expandedThemes: ReadonlySet<string> = new Set(),
 ): Graph {
+  const DRIVE_BLURB = driveBlurb(name);
+  const TRAIT_BLURB = traitBlurb(name);
   const width = Math.min(fullWidth, MAX_W);
   const centerX = width / 2;
   const leftX = width * 0.255;
@@ -362,7 +367,7 @@ function buildGraph(
       title: "You",
       role: "Where it all begins",
       blurb:
-        "Every message you send is how Empiri senses the world. Everything in this map grew from your moments together.",
+        `Every message you send is how ${name} senses the world. Everything in this map grew from your moments together.`,
       valueLabel: momentsPhrase(self.interactions, self.ageHours),
     },
   });
@@ -432,7 +437,7 @@ function buildGraph(
       title: "Drives",
       role: "The nucleus",
       blurb:
-        "Empiri's needs — the quiet pulls behind how it feels. When one goes unmet for a while, it starts to crave it.",
+        `${name}'s needs — the quiet pulls behind how it feels. When one goes unmet for a while, it starts to crave it.`,
     },
     self.drives.map((d) => ({
       id: `drive-${d.key}`,
@@ -441,7 +446,7 @@ function buildGraph(
       detail: {
         title: titleCase(d.key),
         role: "Drive · a quiet need",
-        blurb: DRIVE_BLURB[d.key] ?? "A quiet need shaping how Empiri feels.",
+        blurb: DRIVE_BLURB[d.key] ?? `A quiet need shaping how ${name} feels.`,
         valueLabel: cravingPhrase(d.striving),
         valuePct: clamp(d.striving),
       },
@@ -481,8 +486,8 @@ function buildGraph(
       role: "Its curiosities",
       blurb:
         self.interests.length > 0
-          ? "The things that have caught Empiri's eye, grown from what you talk about."
-          : "Nothing here yet — Empiri's curiosities grow as you chat.",
+          ? `The things that have caught ${name}'s eye, grown from what you talk about.`
+          : `Nothing here yet — ${name}'s curiosities grow as you chat.`,
     },
     (() => {
       const usedSlugs = new Set<string>();
@@ -573,7 +578,7 @@ function buildGraph(
     detail: {
       title: "Voice",
       role: "How it all comes together",
-      blurb: "All of this shapes the way Empiri talks with you.",
+      blurb: `All of this shapes the way ${name} talks with you.`,
       lines:
         self.narrative.length > 0
           ? self.narrative
@@ -677,7 +682,9 @@ export function InnerSelfSheet({
   conversationId,
   onClose,
   warmth = 0,
+  companionName = "Empiri",
 }: InnerSelfSheetProps) {
+  const name = companionName.trim() || "Empiri";
   // Centre-anchored personality tint — neutral warmth keeps today's accent.
   const sheetAccent = accentForWarmth(warmth, SHEET_ACCENT, SHEET_SPECTRUM);
   const insets = useSafeAreaInsets();
@@ -876,8 +883,8 @@ export function InnerSelfSheet({
   });
 
   const graph = useMemo(
-    () => (self ? buildGraph(self, width, expandedThemes) : null),
-    [self, width, expandedThemes],
+    () => (self ? buildGraph(self, width, name, expandedThemes) : null),
+    [self, width, name, expandedThemes],
   );
 
   // Theme nodes toggle their inline member curiosities; everything else
@@ -993,7 +1000,7 @@ export function InnerSelfSheet({
         {mode === "mind" ? (
           <>
             <View style={styles.caption}>
-              <Text style={styles.captionTitle}>EMPIRI&apos;S MIND</Text>
+              <Text style={styles.captionTitle}>{`${name.toUpperCase()}'S MIND`}</Text>
               <Text style={styles.captionSub}>tap a node to look closer</Text>
             </View>
 
@@ -1167,7 +1174,7 @@ export function InnerSelfSheet({
                           editable={!memorySaving}
                           maxLength={2000}
                           style={styles.memoryInput}
-                          placeholder="What should Empiri remember?"
+                          placeholder={`What should ${name} remember?`}
                           placeholderTextColor="rgba(255,255,255,0.35)"
                           testID="memory-edit-input"
                         />
@@ -1264,7 +1271,7 @@ export function InnerSelfSheet({
                             <Pressable
                               onPress={startMemoryEdit}
                               accessibilityRole="button"
-                              accessibilityLabel="Edit what Empiri remembers"
+                              accessibilityLabel={`Edit what ${name} remembers`}
                               testID="memory-edit"
                               style={({ pressed }) => [
                                 styles.memoryBtn,
@@ -1284,7 +1291,7 @@ export function InnerSelfSheet({
                                 setMemoryConfirmClear(true);
                               }}
                               accessibilityRole="button"
-                              accessibilityLabel="Forget what Empiri remembers"
+                              accessibilityLabel={`Forget what ${name} remembers`}
                               testID="memory-clear"
                               style={({ pressed }) => [
                                 styles.memoryBtn,
@@ -1311,8 +1318,7 @@ export function InnerSelfSheet({
                       </Text>
                     ) : null}
                     <Text style={styles.memoryFootnote}>
-                      A gentle recap Empiri keeps so our longer talks stay
-                      connected. You can correct it or ask Empiri to forget.
+                      {`A gentle recap ${name} keeps so our longer talks stay connected. You can correct it or ask ${name} to forget.`}
                     </Text>
                   </>
                 ) : null}

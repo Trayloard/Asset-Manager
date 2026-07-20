@@ -132,6 +132,11 @@ interface GNode {
   value: number | null;
   isHub: boolean;
   detail: NodeDetail;
+  /**
+   * Set on theme nodes only: pressing the node toggles the inline expansion
+   * of this theme's member curiosities instead of opening the detail card.
+   */
+  toggleId?: string;
 }
 
 interface GEdge {
@@ -237,7 +242,7 @@ type InterestItem =
   | {
       kind: "theme";
       label: string;
-      members: { topic: string; affinity: number }[];
+      members: { topic: string; display: string; affinity: number }[];
     };
 
 // Blend member affinities into one "combined weight" so a cluster glows at
@@ -311,6 +316,7 @@ function groupInterests(
     const members = idxs
       .map((i) => ({
         topic: interests[i].topic,
+        display: interests[i].display,
         affinity: interests[i].affinity,
       }))
       .sort((a, b) => b.affinity - a.affinity);
@@ -324,7 +330,11 @@ function groupInterests(
 // TRAITS → INTERESTS → VOICE) with their values branching into two side
 // columns below each hub. The centre stays clear so the spine wires never
 // cross a leaf.
-function buildGraph(self: CompanionSelf, fullWidth: number): Graph {
+function buildGraph(
+  self: CompanionSelf,
+  fullWidth: number,
+  expandedThemes: ReadonlySet<string> = new Set(),
+): Graph {
   const width = Math.min(fullWidth, MAX_W);
   const centerX = width / 2;
   const leftX = width * 0.255;
@@ -363,7 +373,14 @@ function buildGraph(self: CompanionSelf, fullWidth: number): Graph {
     label: string,
     category: Category,
     hubDetail: NodeDetail,
-    leaves: { id: string; label: string; value: number; detail: NodeDetail }[],
+    leaves: {
+      id: string;
+      label: string;
+      value: number;
+      detail: NodeDetail;
+      parent?: string;
+      toggleId?: string;
+    }[],
   ) => {
     const bandTop = bottom + BAND_GAP;
     nodes.push({
@@ -397,8 +414,9 @@ function buildGraph(self: CompanionSelf, fullWidth: number): Graph {
         value: lf.value,
         isHub: false,
         detail: lf.detail,
+        toggleId: lf.toggleId,
       });
-      edges.push({ from: id, to: lf.id, spine: false });
+      edges.push({ from: lf.parent ?? id, to: lf.id, spine: false });
       maxB = Math.max(maxB, cy + LEAF_H / 2);
     });
 
@@ -466,46 +484,79 @@ function buildGraph(self: CompanionSelf, fullWidth: number): Graph {
           ? "The things that have caught Empiri's eye, grown from what you talk about."
           : "Nothing here yet — Empiri's curiosities grow as you chat.",
     },
-    groupInterests(self.interests, self.themes).map((item) => {
-      if (item.kind === "single") {
-        return {
-          id: `interest-${item.orig}`,
-          label: item.display.toUpperCase(),
-          value: clamp(item.affinity),
+    (() => {
+      const usedSlugs = new Set<string>();
+      return groupInterests(self.interests, self.themes).flatMap((item) => {
+        if (item.kind === "single") {
+          return [
+            {
+              id: `interest-${item.orig}`,
+              label: item.display.toUpperCase(),
+              value: clamp(item.affinity),
+              detail: {
+                title: item.display,
+                role: "Curiosity · caught its eye",
+                blurb:
+                  "Something you've talked about that's started to matter to Empiri.",
+                valueLabel: affinityPhrase(item.affinity),
+                valuePct: clamp(item.affinity),
+              },
+            },
+          ];
+        }
+        const value = combinedWeight(item.members);
+        // Slugs must stay unique even if two theme labels collapse to the
+        // same slug — duplicate node ids would scramble wires and React keys.
+        let slug = item.label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+        if (usedSlugs.has(slug)) {
+          let n = 2;
+          while (usedSlugs.has(`${slug}-${n}`)) n++;
+          slug = `${slug}-${n}`;
+        }
+        usedSlugs.add(slug);
+        const themeId = `interest-theme-${slug}`;
+        const shown = item.members.slice(0, 6);
+        const lines = shown.map(
+          (m) => `${m.topic.toUpperCase()} · ${affinityPhrase(m.affinity)}`,
+        );
+        if (item.members.length > shown.length) {
+          lines.push(`+${item.members.length - shown.length} more`);
+        }
+        const themeLeaf = {
+          id: themeId,
+          toggleId: slug,
+          label: `${item.label.toUpperCase()} ·${item.members.length}`,
+          value,
           detail: {
-            title: item.display,
-            role: "Curiosity · caught its eye",
+            title: item.label,
+            role: `Theme · ${item.members.length} curiosities`,
             blurb:
-              "Something you've talked about that's started to matter to Empiri.",
-            valueLabel: affinityPhrase(item.affinity),
-            valuePct: clamp(item.affinity),
+              "A few related things you keep coming back to, gathered into one curiosity. Tap to open or close it.",
+            valueLabel: affinityPhrase(value),
+            valuePct: value,
+            lines,
           },
         };
-      }
-      const value = combinedWeight(item.members);
-      const slug = item.label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-      const shown = item.members.slice(0, 6);
-      const lines = shown.map(
-        (m) => `${m.topic.toUpperCase()} · ${affinityPhrase(m.affinity)}`,
-      );
-      if (item.members.length > shown.length) {
-        lines.push(`+${item.members.length - shown.length} more`);
-      }
-      return {
-        id: `interest-theme-${slug}`,
-        label: `${item.label.toUpperCase()} ·${item.members.length}`,
-        value,
-        detail: {
-          title: item.label,
-          role: `Theme · ${item.members.length} curiosities`,
-          blurb:
-            "A few related things you keep coming back to, gathered into one curiosity.",
-          valueLabel: affinityPhrase(value),
-          valuePct: value,
-          lines,
-        },
-      };
-    }),
+        if (!expandedThemes.has(slug)) return [themeLeaf];
+        return [
+          themeLeaf,
+          ...item.members.map((m, j) => ({
+            id: `${themeId}-m${j}`,
+            parent: themeId,
+            label: m.display.toUpperCase(),
+            value: clamp(m.affinity),
+            detail: {
+              title: m.display,
+              role: `Curiosity · part of ${item.label}`,
+              blurb:
+                "Something you've talked about that's started to matter to Empiri.",
+              valueLabel: affinityPhrase(m.affinity),
+              valuePct: clamp(m.affinity),
+            },
+          })),
+        ];
+      });
+    })(),
   );
 
   const vTop = bottom + BAND_GAP;
@@ -637,6 +688,10 @@ export function InnerSelfSheet({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [selected, setSelected] = useState<GNode | null>(null);
+  // Slugs of curiosity themes currently expanded inline on the mind map.
+  const [expandedThemes, setExpandedThemes] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [mode, setMode] = useState<SheetMode>("mind");
   const [memory, setMemory] = useState<string | null>(null);
   const [memoryLoading, setMemoryLoading] = useState(false);
@@ -713,6 +768,7 @@ export function InnerSelfSheet({
   useEffect(() => {
     if (!visible) {
       setSelected(null);
+      setExpandedThemes(new Set());
       setMode("mind");
       setMemoryEditing(false);
       setMemoryConfirmClear(false);
@@ -820,9 +876,28 @@ export function InnerSelfSheet({
   });
 
   const graph = useMemo(
-    () => (self ? buildGraph(self, width) : null),
-    [self, width],
+    () => (self ? buildGraph(self, width, expandedThemes) : null),
+    [self, width, expandedThemes],
   );
+
+  // Theme nodes toggle their inline member curiosities; everything else
+  // opens the bottom detail card.
+  const handleNodePress = (n: GNode) => {
+    const slug = n.toggleId;
+    if (slug != null) {
+      setExpandedThemes((prev) => {
+        const next = new Set(prev);
+        if (next.has(slug)) {
+          next.delete(slug);
+        } else {
+          next.add(slug);
+        }
+        return next;
+      });
+      return;
+    }
+    setSelected(n);
+  };
 
   const wires = useMemo(() => {
     if (!graph) return [];
@@ -1001,7 +1076,7 @@ export function InnerSelfSheet({
                       node={n}
                       pulse={pulse}
                       reduceMotion={reduceMotion}
-                      onPress={setSelected}
+                      onPress={handleNodePress}
                     />
                   ))}
                 </View>
@@ -1296,6 +1371,7 @@ export function InnerSelfSheet({
           <>
             <Pressable
               style={styles.detailBackdrop}
+              testID="detail-backdrop"
               onPress={() => setSelected(null)}
             />
             <Animated.View

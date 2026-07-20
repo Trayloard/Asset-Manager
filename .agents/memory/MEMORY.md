@@ -18,3 +18,4 @@
 - [API post-response work needs Reserved VM](api-post-response-work.md) — self folds run after res.end via in-memory queue; Autoscale kills them + multi-instance races; all self-savers must queue+reload.
 - [Orval schema naming collision](orval-schema-naming-collision.md) — never name an OpenAPI body schema `<OperationId>Body`; use `...Input` or api-zod codegen dies on duplicate exports.
 - [Meaning-based curiosity grouping](interest-theme-grouping.md) — themes are LLM-computed server-side, cached by topic-set signature; JSONB rejects \u0000; gpt-5-mini needs ≥4096 completion tokens.
+- [Task specs may assume unmerged features](task-specs-unmerged-features.md) — isolated-env tasks can describe behavior as "now" existing that isn't in this checkout; verify with grep and implement it if missing.

@@ -1,12 +1,12 @@
 - [Voice on Expo mobile](voice-on-expo.md) — record with expo-audio + base64 to your own OpenAI STT/TTS endpoints; MediaRecorder web libs don't work in RN; native-first, web degrades.
-- [Monorepo typecheck gotchas](monorepo-typecheck-gotchas.md) — root `pnpm run typecheck` has a pre-existing mockup-sandbox failure (dup @types/react); rebuild libs first.
+- [Monorepo typecheck gotchas](monorepo-typecheck-gotchas.md) — root typecheck is now green and gated by a validation command; per-package runs mislead, rebuild libs first.
 - [Companion DB schema drift](companion-db-schema-drift.md) — API 500 on conversation insert? isolated-env DB has columns not in Drizzle schema; run `pnpm --filter @workspace/db run push`.
 - [Running ad-hoc TS scripts](running-ts-scripts-monorepo.md) — node/tsx scripts importing @workspace/* fail (no tsx; dir-import ERR); test via package jest or the running HTTP API instead.
 - [video-js tsconfig DOM lib](video-js-scaffold-tsconfig-dom.md) — video artifact typecheck fails on window/document/audio; add `lib:["es2022","dom","dom.iterable"]` to the artifact tsconfig, not the base.
 - [Reanimated SharedValue type](reanimated-shared-value-type.md) — reanimated v4: import `type SharedValue` directly; `Animated.SharedValue` doesn't exist and fails tsc.
 - [Empiri evolving self](neurobrane-self.md) — persona is composed at request time from a server-persisted evolving self (lib/neurobrane + companion_selves), not a hardcoded prompt.
 - [Empiri check-in cadence vs bell](empiri-checkin-cadence.md) — keep cadence + notification bell as two persisted prefs; couple only at the off boundary; never merge into one.
-- [Mobile test-suite pre-existing failures](mobile-test-suite-preexisting-failures.md) — CompanionContext proactive-check-in jest suite + auth.tsx 'nonce' typecheck fail deterministically, independent of UI work; don't block on them.
+- [Mobile test-suite pre-existing failures](mobile-test-suite-preexisting-failures.md) — historical CompanionContext jest + auth.tsx 'nonce' failures are fixed (July 2026); keep the auth/api-client mocks intact.
 - [Empiri auth ownership pattern](empiri-auth-ownership.md) — all conversation routes enforce owner_id == req.user.id via requireOwnedConversation(); cross-user access returns 404 not 403 to avoid leaking existence.
 - [api-server dev hot-reload misses new routes](api-server-dev-hot-reload.md) — newly added Express routes 404 until you restart the API Server workflow; smoke-test on localhost:8080.
 - [Interest display vs key](neurobrane-interest-display-vs-key.md) — interests carry a normalized lowercase key (matching/dedup/decay only) + a separate cosmetic display casing; never dedup on display.

@@ -386,7 +386,7 @@ export default function CompanionScreen() {
               inverted
               keyExtractor={(item: Message) => String(item.id)}
               renderItem={({ item }) => (
-                <MessageBubble role={item.role} content={item.content} />
+                <MessageBubble role={item.role} content={item.content} warmth={smoothWarmth} />
               )}
               ListHeaderComponent={
                 status === "thinking" || status === "transcribing" ? (

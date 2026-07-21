@@ -1,6 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import {
   clearCompanionMemory,
+  deleteCompanionFact,
   getCompanionMemory,
   getCompanionSelf,
   updateCompanionMemory,
@@ -733,6 +734,11 @@ export function InnerSelfSheet({
   // Durable personal facts Empiri holds about the user, most salient first.
   const facts = self?.facts ?? [];
 
+  // Which fact key is currently being deleted (one at a time).
+  const [deletingFactKey, setDeletingFactKey] = useState<string | null>(null);
+  // Error shown beneath the facts card when a delete fails.
+  const [factDeleteError, setFactDeleteError] = useState<string | null>(null);
+
   const switchMode = (next: SheetMode) => {
     if (next === mode) return;
     if (Platform.OS !== "web") {
@@ -740,6 +746,35 @@ export function InnerSelfSheet({
     }
     setSelected(null);
     setMode(next);
+  };
+
+  const deleteFact = async (key: string) => {
+    if (conversationId == null || deletingFactKey != null) return;
+    setFactDeleteError(null);
+    setDeletingFactKey(key);
+
+    // Optimistically remove from local state so the UI responds instantly.
+    const previousFacts = self?.facts ?? [];
+    setSelf((prev) =>
+      prev ? { ...prev, facts: prev.facts.filter((f) => f.key !== key) } : prev,
+    );
+
+    try {
+      await deleteCompanionFact(conversationId, key);
+      if (Platform.OS !== "web") {
+        Haptics.notificationAsync(
+          Haptics.NotificationFeedbackType.Success,
+        ).catch(() => {});
+      }
+    } catch {
+      // Restore on failure.
+      setSelf((prev) =>
+        prev ? { ...prev, facts: previousFacts } : prev,
+      );
+      setFactDeleteError("Couldn't remove that just now. Please try again.");
+    } finally {
+      setDeletingFactKey(null);
+    }
   };
 
   useEffect(() => {
@@ -840,6 +875,8 @@ export function InnerSelfSheet({
       setMemoryEditing(false);
       setMemoryConfirmClear(false);
       setMemoryActionError(null);
+      setDeletingFactKey(null);
+      setFactDeleteError(null);
       bgThemeRefreshFired.current = false;
     }
   }, [visible]);
@@ -1424,9 +1461,50 @@ export function InnerSelfSheet({
                             ]}
                           />
                           <Text style={styles.factText}>{fact.text}</Text>
+                          <Pressable
+                            onPress={() => deleteFact(fact.key)}
+                            disabled={deletingFactKey != null}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Forget this — ${fact.text}`}
+                            testID={`fact-delete-${fact.key}`}
+                            hitSlop={10}
+                            style={({ pressed }) => [
+                              styles.factDeleteBtn,
+                              {
+                                opacity:
+                                  pressed ||
+                                  deletingFactKey === fact.key
+                                    ? 0.35
+                                    : deletingFactKey != null
+                                      ? 0.3
+                                      : 0.65,
+                              },
+                            ]}
+                          >
+                            {deletingFactKey === fact.key ? (
+                              <ActivityIndicator
+                                size="small"
+                                color="rgba(231,233,245,0.7)"
+                              />
+                            ) : (
+                              <Feather
+                                name="x"
+                                size={15}
+                                color="rgba(231,233,245,0.9)"
+                              />
+                            )}
+                          </Pressable>
                         </View>
                       ))}
                     </View>
+                    {factDeleteError ? (
+                      <Text
+                        style={styles.memoryActionErrorText}
+                        testID="fact-delete-error"
+                      >
+                        {factDeleteError}
+                      </Text>
+                    ) : null}
                     <Text style={styles.memoryFootnote}>
                       Little things you&apos;ve shared — the ones we return to
                       stay the brightest.
@@ -1791,6 +1869,13 @@ const styles = StyleSheet.create({
     fontSize: 14.5,
     lineHeight: 21,
     color: "rgba(231,233,245,0.92)",
+  },
+  factDeleteBtn: {
+    width: 28,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 6,
   },
   node: {
     position: "absolute",

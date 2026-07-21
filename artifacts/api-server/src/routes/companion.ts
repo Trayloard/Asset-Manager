@@ -20,7 +20,7 @@ import {
   UpdateCompanionMemoryBody,
 } from "@workspace/api-zod";
 import { loadOrCreateSelf, saveSelf } from "../lib/companionSelf";
-import { getInterestThemes } from "../lib/interestThemes";
+import { getInterestThemesCached } from "../lib/interestThemes";
 import {
   enqueueConversationTask,
   queueSelfEvolution,
@@ -684,7 +684,7 @@ router.get("/conversations/:id/self", async (req, res) => {
 
   let themes: Record<string, string> | null = null;
   try {
-    themes = await getInterestThemes(conversation.id, summary.interests);
+    themes = await getInterestThemesCached(conversation.id, summary.interests);
   } catch (err) {
     req.log.error({ err }, "Failed to group curiosities by meaning");
   }

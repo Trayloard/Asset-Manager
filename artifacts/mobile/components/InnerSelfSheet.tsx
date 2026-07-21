@@ -9,7 +9,7 @@ import {
 } from "@workspace/api-client-react";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
@@ -726,6 +726,10 @@ export function InnerSelfSheet({
   const [selfAttempt, setSelfAttempt] = useState(0);
   const [memoryAttempt, setMemoryAttempt] = useState(0);
 
+  // Tracks whether a background theme refresh has fired for the current
+  // sheet open. Reset when the sheet closes so each open gets one refresh.
+  const bgThemeRefreshFired = useRef(false);
+
   // Durable personal facts Empiri holds about the user, most salient first.
   const facts = self?.facts ?? [];
 
@@ -743,9 +747,56 @@ export function InnerSelfSheet({
     let cancelled = false;
     setLoading(true);
     setError(false);
+
+    // Only the very first attempt per sheet open fires the background theme
+    // refresh. Retries skip it so they don't add unexpected extra fetches.
+    const shouldFireBgRefresh = !bgThemeRefreshFired.current;
+    bgThemeRefreshFired.current = true;
+
     getCompanionSelf(conversationId)
       .then((data) => {
-        if (!cancelled) setSelf(data);
+        if (!cancelled) {
+          setSelf(data);
+
+          if (shouldFireBgRefresh) {
+            // Poll for fresh themes after the server's background LLM recompute.
+            // The server returns cached (possibly stale or null) themes immediately
+            // and starts a background model call; we wait increasing delays to
+            // give it time to finish before each re-fetch.
+            //
+            // Termination: stop when themes CHANGE from the initial value
+            // (compared by JSON serialisation), which handles both the
+            // null-→-non-null path AND the stale-non-null-→-fresh path.
+            // If the budget is exhausted without a change, we give up silently;
+            // the next sheet open will have a warmer cache.
+            const initialThemesKey = JSON.stringify(data.themes);
+            const DELAYS_MS = [2000, 4000, 6000];
+            let attempt = 0;
+
+            const poll = () => {
+              if (cancelled || attempt >= DELAYS_MS.length) return;
+              const delay = DELAYS_MS[attempt++];
+              setTimeout(() => {
+                if (cancelled) return;
+                getCompanionSelf(conversationId)
+                  .then((fresh) => {
+                    if (cancelled) return;
+                    if (JSON.stringify(fresh.themes) !== initialThemesKey) {
+                      // Themes changed — apply and stop polling.
+                      setSelf((prev) =>
+                        prev ? { ...prev, themes: fresh.themes } : prev,
+                      );
+                    } else {
+                      // Same as before — try again after the next delay.
+                      poll();
+                    }
+                  })
+                  .catch(() => poll());
+              }, delay);
+            };
+            poll();
+          }
+        }
       })
       .catch(() => {
         if (!cancelled) setError(true);
@@ -789,6 +840,7 @@ export function InnerSelfSheet({
       setMemoryEditing(false);
       setMemoryConfirmClear(false);
       setMemoryActionError(null);
+      bgThemeRefreshFired.current = false;
     }
   }, [visible]);
 

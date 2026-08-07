@@ -655,7 +655,7 @@ components:
       name: Authorization
       in: header
       required: false
-      description: Opaque session token — `Bearer <sid>`.
+      description: Opaque session token provided in the Authorization header.
       schema:
         type: string
     SessionCookie:

@@ -18,14 +18,14 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { CompanionProvider } from "@/contexts/CompanionContext";
-import { AuthProvider } from "@/lib/auth";
+import { AUTH_TOKEN_KEY, AuthProvider } from "@/lib/auth";
 
 // Expo bundles run outside the web proxy and need absolute URLs to reach the API.
 const domain = process.env.EXPO_PUBLIC_DOMAIN;
 if (domain) setBaseUrl(`https://${domain}`);
 
 // Attach the session token as a Bearer header on every API call.
-setAuthTokenGetter(() => SecureStore.getItemAsync("auth_session_token"));
+setAuthTokenGetter(() => SecureStore.getItemAsync(AUTH_TOKEN_KEY));
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();

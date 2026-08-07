@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import { Buffer } from "node:buffer";
 import {
   ensureCompatibleFormat,
@@ -10,8 +10,8 @@ import { TranscribeAudioBody, SynthesizeSpeechBody } from "@workspace/api-zod";
 const router: IRouter = Router();
 
 function requireAuthentication(
-  req: Express.Request,
-  res: Express.Response,
+  req: Request,
+  res: Response,
 ): boolean {
   if (req.isAuthenticated()) return true;
 

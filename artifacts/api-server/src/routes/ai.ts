@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, conversations, messages } from "@workspace/db";
-import { asc, desc, eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 
 import { buildCompanionSystemPrompt } from "../lib/companionPrompt";
 import { getOrCreateCompanionSettings } from "./companion";

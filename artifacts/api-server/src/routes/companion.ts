@@ -15,14 +15,6 @@ import {
 const router: IRouter = Router();
 
 export async function getOrCreateCompanionSettings(userId: string) {
-  const [existing] = await db
-    .select()
-    .from(companionSettings)
-    .where(eq(companionSettings.userId, userId))
-    .limit(1);
-
-  if (existing) return existing;
-
   const [created] = await db
     .insert(companionSettings)
     .values({
@@ -30,8 +22,20 @@ export async function getOrCreateCompanionSettings(userId: string) {
       name: DEFAULT_COMPANION_NAME,
       tone: DEFAULT_COMPANION_TONE,
     })
+    .onConflictDoNothing({
+      target: companionSettings.userId,
+    })
     .returning();
-  return created!;
+
+  if (created) return created;
+
+  const [existing] = await db
+    .select()
+    .from(companionSettings)
+    .where(eq(companionSettings.userId, userId))
+    .limit(1);
+
+  return existing!;
 }
 
 router.get("/companion-settings", async (req: Request, res: Response) => {

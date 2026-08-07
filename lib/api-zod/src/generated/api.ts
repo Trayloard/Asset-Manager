@@ -21,7 +21,7 @@ export const HealthCheckResponse = zod.object({
  * @summary Get the currently authenticated user
  */
 export const GetCurrentAuthUserHeader = zod.object({
-  "Authorization": zod.string().optional().describe('Opaque session token — `Bearer <sid>`.')
+  "Authorization": zod.string().optional().describe('Opaque session token provided in the Authorization header.')
 })
 
 export const GetCurrentAuthUserResponse = zod.object({
@@ -57,7 +57,7 @@ export const HandleBrowserLoginCallbackQueryParams = zod.object({
  * @summary Clear the session and begin OIDC logout
  */
 export const LogoutBrowserSessionHeader = zod.object({
-  "Authorization": zod.string().optional().describe('Opaque session token — `Bearer <sid>`.')
+  "Authorization": zod.string().optional().describe('Opaque session token provided in the Authorization header.')
 })
 
 
@@ -88,7 +88,7 @@ export const ExchangeMobileAuthorizationCodeResponse = zod.object({
  * @summary Delete a mobile session token
  */
 export const LogoutMobileSessionHeader = zod.object({
-  "Authorization": zod.string().optional().describe('Opaque session token — `Bearer <sid>`.')
+  "Authorization": zod.string().optional().describe('Opaque session token provided in the Authorization header.')
 })
 
 export const LogoutMobileSessionResponse = zod.object({
@@ -387,7 +387,7 @@ export const TranscribeAudioResponse = zod.object({
  * @summary Get the companion personalisation settings for the current user
  */
 export const GetCompanionSettingsHeader = zod.object({
-  "Authorization": zod.string().optional().describe('Opaque session token — `Bearer <sid>`.')
+  "Authorization": zod.string().optional().describe('Opaque session token provided in the Authorization header.')
 })
 
 export const GetCompanionSettingsResponse = zod.object({
@@ -401,7 +401,7 @@ export const GetCompanionSettingsResponse = zod.object({
  * @summary Save companion personalisation settings
  */
 export const UpdateCompanionSettingsHeader = zod.object({
-  "Authorization": zod.string().optional().describe('Opaque session token — `Bearer <sid>`.')
+  "Authorization": zod.string().optional().describe('Opaque session token provided in the Authorization header.')
 })
 
 export const updateCompanionSettingsBodyCompanionNameMax = 32;

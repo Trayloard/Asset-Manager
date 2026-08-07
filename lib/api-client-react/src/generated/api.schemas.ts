@@ -317,7 +317,7 @@ export interface ApiError {
 }
 
 /**
- * Opaque session token — `Bearer <sid>`.
+ * Opaque session token provided in the Authorization header.
  */
 export type AuthorizationSessionHeaderParameter = string;
 

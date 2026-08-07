@@ -184,4 +184,4 @@ overrides:
   esbuild: "^0.28.1"
 
 allowBuilds:
-  esbuild: true
+  esbuild: set this to true or false

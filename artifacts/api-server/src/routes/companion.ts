@@ -30,8 +30,19 @@ export async function getOrCreateCompanionSettings(userId: string) {
       name: DEFAULT_COMPANION_NAME,
       tone: DEFAULT_COMPANION_TONE,
     })
+    .onConflictDoNothing({
+      target: companionSettings.userId,
+    })
     .returning();
-  return created!;
+  if (created) return created;
+
+  const [racedExisting] = await db
+    .select()
+    .from(companionSettings)
+    .where(eq(companionSettings.userId, userId))
+    .limit(1);
+
+  return racedExisting!;
 }
 
 router.get("/companion-settings", async (req: Request, res: Response) => {

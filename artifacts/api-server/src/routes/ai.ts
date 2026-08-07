@@ -1,4 +1,3 @@
-import { openai } from "@workspace/integrations-openai-ai-server";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, conversations, messages } from "@workspace/db";
 import { asc, eq } from "drizzle-orm";
@@ -8,6 +7,12 @@ import { getOrCreateCompanionSettings } from "./companion";
 import { DEFAULT_TITLE, getOwnedConversation } from "./conversations";
 
 const router: IRouter = Router();
+const MAX_CONTEXT_MESSAGES = 40;
+
+async function getOpenAIClient() {
+  const { openai } = await import("@workspace/integrations-openai-ai-server");
+  return openai;
+}
 
 router.post("/ai/chat", async (req: Request, res: Response) => {
   if (!req.isAuthenticated()) {
@@ -86,11 +91,20 @@ router.post("/ai/chat", async (req: Request, res: Response) => {
     content: string;
   }> = [
     { role: "system", content: systemPrompt },
-    ...history.map((m) => ({
+    ...history.slice(-MAX_CONTEXT_MESSAGES).map((m) => ({
       role: m.role as "user" | "assistant",
       content: m.content,
     })),
   ];
+
+  let openai;
+  try {
+    openai = await getOpenAIClient();
+  } catch (err) {
+    req.log.error({ err }, "OpenAI client unavailable");
+    res.status(503).json({ error: "AI unavailable" });
+    return;
+  }
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");

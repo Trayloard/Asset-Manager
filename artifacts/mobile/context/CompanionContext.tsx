@@ -91,6 +91,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [settings, setSettings] = useState<CompanionSettings>(DEFAULT_SETTINGS);
   const abortRef = useRef<AbortController | null>(null);
+  const sendLockRef = useRef(false);
 
   // Load the conversation list on auth. Create a first conversation if the
   // user has none, then make the newest one active.
@@ -169,9 +170,11 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
 
   const sendMessage = useCallback(
     async (text: string) => {
-      if (isStreaming) return;
+      if (isStreaming || sendLockRef.current) return;
       const activeId = activeConversationId;
       if (activeId == null) return;
+      sendLockRef.current = true;
+      setIsStreaming(true);
 
       const userMsg: Message = {
         id: generateId(),
@@ -207,7 +210,6 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
 
       const withAssistant = [...updatedMessages, assistantMsg];
       setMessages(withAssistant);
-      setIsStreaming(true);
 
       try {
         const controller = new AbortController();
@@ -323,6 +325,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         setCreatureState("sad");
         setTimeout(() => setCreatureState("idle"), 3000);
       } finally {
+        abortRef.current = null;
+        sendLockRef.current = false;
         setIsStreaming(false);
       }
     },
@@ -331,14 +335,14 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
 
   const switchConversation = useCallback(
     (id: number) => {
-      if (isStreaming) return;
+      if (isStreaming || sendLockRef.current) return;
       setActiveConversationId((cur) => (cur === id ? cur : id));
     },
     [isStreaming],
   );
 
   const newConversation = useCallback(async () => {
-    if (isStreaming) return;
+    if (isStreaming || sendLockRef.current) return;
     // Already on a fresh, empty chat — no need to spawn another.
     if (messages.length === 0) return;
     try {
@@ -350,7 +354,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   }, [isStreaming, messages.length]);
 
   const deleteActiveConversation = useCallback(async () => {
-    if (isStreaming) return;
+    if (isStreaming || sendLockRef.current) return;
     const id = activeConversationId;
     if (id == null) return;
 

@@ -9,8 +9,20 @@ import { TranscribeAudioBody, SynthesizeSpeechBody } from "@workspace/api-zod";
 
 const router: IRouter = Router();
 
+function requireAuthentication(
+  req: Express.Request,
+  res: Express.Response,
+): boolean {
+  if (req.isAuthenticated()) return true;
+
+  res.status(401).json({ error: "Unauthorized" });
+  return false;
+}
+
 // Transcribe recorded audio into text
 router.post("/voice/transcribe", async (req, res) => {
+  if (!requireAuthentication(req, res)) return;
+
   const parsed = TranscribeAudioBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Audio data is required" });
@@ -49,6 +61,8 @@ router.post("/voice/transcribe", async (req, res) => {
 
 // Convert text into spoken audio
 router.post("/voice/speech", async (req, res) => {
+  if (!requireAuthentication(req, res)) return;
+
   const parsed = SynthesizeSpeechBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Text is required" });

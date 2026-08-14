@@ -41,7 +41,10 @@ export async function getOrCreateCompanionSettings(userId: string) {
     .from(companionSettings)
     .where(eq(companionSettings.userId, userId))
     .limit(1);
-  return winner!;
+  if (!winner) {
+    throw new Error(`Failed to resolve companion settings for user ${userId}`);
+  }
+  return winner;
 }
 
 router.get("/companion-settings", async (req: Request, res: Response) => {

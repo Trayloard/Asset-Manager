@@ -15,4 +15,8 @@ export interface CompanionChapter {
   text: string;
   /** Core themes of the period (normalized topic keys). */
   themes: string[];
+  /** Optional source lines that grounded this chapter. */
+  sourceLines?: string[];
+  /** Optional representative epoch ms for the chapter memory. */
+  memoryDate?: number;
 }

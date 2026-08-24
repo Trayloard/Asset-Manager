@@ -1,12 +1,4 @@
-import React, {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  useCallback,
-  useMemo,
-  type ReactNode,
-} from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
 import * as AuthSession from "expo-auth-session";
 import * as Crypto from "expo-crypto";
 import * as WebBrowser from "expo-web-browser";
@@ -31,6 +23,7 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   login: () => Promise<void>;
   logout: () => Promise<void>;
+  deleteAccount: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue>({
@@ -39,6 +32,7 @@ const AuthContext = createContext<AuthContextValue>({
   isAuthenticated: false,
   login: async () => {},
   logout: async () => {},
+  deleteAccount: async () => {},
 });
 
 function getApiBaseUrl(): string {
@@ -59,6 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const discovery = AuthSession.useAutoDiscovery(ISSUER_URL);
 
   const redirectUri = AuthSession.makeRedirectUri();
+
   const nonce = useMemo(() => Crypto.randomUUID(), []);
 
   const [request, response, promptAsync] = AuthSession.useAuthRequest(
@@ -173,6 +168,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const deleteAccount = useCallback(async () => {
+    const token = await SecureStore.getItemAsync(AUTH_TOKEN_KEY);
+    if (token) {
+      const apiBase = getApiBaseUrl();
+      const res = await fetch(`${apiBase}/api/account`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        throw new Error(`Account deletion failed (${res.status})`);
+      }
+    }
+    // Only clear local credentials once the server has confirmed deletion, so
+    // a failed request never makes the user think their account is gone.
+    await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
+    setUser(null);
+  }, []);
+
   return (
     <AuthContext.Provider
       value={{
@@ -181,6 +194,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!user,
         login,
         logout,
+        deleteAccount,
       }}
     >
       {children}

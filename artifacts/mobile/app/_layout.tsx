@@ -8,7 +8,7 @@ import {
 } from "@expo-google-fonts/plus-jakarta-sans";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setAuthTokenGetter, setBaseUrl } from "@workspace/api-client-react";
-import { Stack } from "expo-router";
+import { Stack, useRouter, useSegments } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
@@ -18,24 +18,36 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { CompanionProvider } from "@/contexts/CompanionContext";
-import { AUTH_TOKEN_KEY, AuthProvider } from "@/lib/auth";
+import { AUTH_TOKEN_KEY, AuthProvider, useAuth } from "@/lib/auth";
 
-// Expo bundles run outside the web proxy and need absolute URLs to reach the API.
 const domain = process.env.EXPO_PUBLIC_DOMAIN;
 if (domain) setBaseUrl(`https://${domain}`);
-
-// Attach the session token as a Bearer header on every API call.
 setAuthTokenGetter(() => SecureStore.getItemAsync(AUTH_TOKEN_KEY));
 
-// Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
 
 function RootLayoutNav() {
+  const { isLoading, isAuthenticated } = useAuth();
+  const segments = useSegments();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (isLoading) return;
+    const inSignIn = segments[0] === "sign-in";
+    if (!isAuthenticated && !inSignIn) {
+      router.replace("/sign-in");
+    } else if (isAuthenticated && inSignIn) {
+      router.replace("/");
+    }
+  }, [isAuthenticated, isLoading, router, segments]);
+
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
+      <Stack.Screen name="sign-in" />
+      <Stack.Screen name="profile" />
       <Stack.Screen name="companion-settings" />
       <Stack.Screen name="evolution-log" />
     </Stack>
@@ -55,7 +67,7 @@ export default function RootLayout() {
     if (fontsLoaded || fontError) {
       SplashScreen.hideAsync();
     }
-  }, [fontsLoaded, fontError]);
+  }, [fontError, fontsLoaded]);
 
   if (!fontsLoaded && !fontError) return null;
 
@@ -63,7 +75,7 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <ErrorBoundary>
         <QueryClientProvider client={queryClient}>
-          <GestureHandlerRootView>
+          <GestureHandlerRootView style={{ flex: 1 }}>
             <KeyboardProvider>
               <AuthProvider>
                 <CompanionProvider>

@@ -103,7 +103,9 @@ export const LogoutMobileSessionResponse = zod.object({
 export const ListConversationsResponseItem = zod.object({
   "id": zod.number(),
   "title": zod.string(),
-  "createdAt": zod.coerce.date()
+  "createdAt": zod.coerce.date(),
+  "lastMessageText": zod.string().nullish(),
+  "lastMessageAt": zod.coerce.date().nullish()
 })
 export const ListConversationsResponse = zod.array(ListConversationsResponseItem)
 
@@ -126,7 +128,9 @@ export const GetConversationParams = zod.object({
 export const GetConversationResponse = zod.object({
   "id": zod.number(),
   "title": zod.string(),
-  "createdAt": zod.coerce.date()
+  "createdAt": zod.coerce.date(),
+  "lastMessageText": zod.string().nullish(),
+  "lastMessageAt": zod.coerce.date().nullish()
 })
 
 
@@ -148,7 +152,9 @@ export const RenameConversationBody = zod.object({
 export const RenameConversationResponse = zod.object({
   "id": zod.number(),
   "title": zod.string(),
-  "createdAt": zod.coerce.date()
+  "createdAt": zod.coerce.date(),
+  "lastMessageText": zod.string().nullish(),
+  "lastMessageAt": zod.coerce.date().nullish()
 })
 
 
@@ -284,7 +290,9 @@ export const GetCompanionSelfResponse = zod.object({
   "from": zod.number().describe('Epoch ms of the earliest moment the chapter covers.'),
   "to": zod.number().describe('Epoch ms of the latest moment the chapter covers.'),
   "text": zod.string().describe('The condensed chapter text, second person (\"Back then you…\").'),
-  "themes": zod.array(zod.string()).describe('Core themes of the period (normalized topic keys).')
+  "themes": zod.array(zod.string()).describe('Core themes of the period (normalized topic keys).'),
+  "sourceLines": zod.array(zod.string()).optional().describe('Optional source lines that grounded this chapter.'),
+  "memoryDate": zod.number().optional().describe('Optional representative epoch ms for the chapter memory.')
 })).describe('The condensed life story so far — dated chapters, oldest first.'),
   "interactions": zod.number(),
   "ageHours": zod.number(),
@@ -436,6 +444,84 @@ export const SynthesizeSpeechBody = zod.object({
 export const SynthesizeSpeechResponse = zod.object({
   "audio": zod.string().describe('Base64-encoded MP3 audio'),
   "format": zod.string()
+})
+
+
+/**
+ * @summary Load the messages for a specific conversation
+ */
+export const GetConversationMessagesParams = zod.object({
+  "conversationId": zod.coerce.number().describe('Numeric id of the conversation.')
+})
+
+export const GetConversationMessagesHeader = zod.object({
+  "Authorization": zod.string().optional().describe('Opaque session token — `Bearer <sid>`.')
+})
+
+export const GetConversationMessagesResponse = zod.object({
+  "messages": zod.array(zod.object({
+  "id": zod.string(),
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string(),
+  "timestamp": zod.number().describe('Unix timestamp in milliseconds.')
+}))
+})
+
+
+/**
+ * @summary Append a message to a specific conversation
+ */
+export const SaveConversationMessageParams = zod.object({
+  "conversationId": zod.coerce.number().describe('Numeric id of the conversation.')
+})
+
+export const SaveConversationMessageHeader = zod.object({
+  "Authorization": zod.string().optional().describe('Opaque session token — `Bearer <sid>`.')
+})
+
+
+
+
+export const SaveConversationMessageBody = zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string().min(1)
+})
+
+export const SaveConversationMessageResponse = zod.object({
+  "message": zod.object({
+  "id": zod.string(),
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string(),
+  "timestamp": zod.number().describe('Unix timestamp in milliseconds.')
+})
+})
+
+
+/**
+ * @summary Delete a specific conversation and its messages
+ */
+export const DeleteConversationParams = zod.object({
+  "conversationId": zod.coerce.number().describe('Numeric id of the conversation.')
+})
+
+export const DeleteConversationHeader = zod.object({
+  "Authorization": zod.string().optional().describe('Opaque session token — `Bearer <sid>`.')
+})
+
+export const DeleteConversationResponse = zod.object({
+  "success": zod.boolean()
+})
+
+
+/**
+ * @summary Permanently delete the authenticated user and all their data
+ */
+export const DeleteAccountHeader = zod.object({
+  "Authorization": zod.string().optional().describe('Opaque session token — `Bearer <sid>`.')
+})
+
+export const DeleteAccountResponse = zod.object({
+  "success": zod.boolean()
 })
 
 

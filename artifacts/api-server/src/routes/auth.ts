@@ -5,15 +5,10 @@ import {
   ExchangeMobileAuthorizationCodeBody,
   ExchangeMobileAuthorizationCodeResponse,
   LogoutMobileSessionResponse,
-<<<<<<< HEAD
   DeleteAccountResponse,
 } from "@workspace/api-zod";
 import { db, usersTable, sessionsTable } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
-=======
-} from "@workspace/api-zod";
-import { db, usersTable } from "@workspace/db";
->>>>>>> origin/main
 import {
   clearSession,
   getOidcConfig,
@@ -276,7 +271,6 @@ router.post("/mobile-auth/logout", async (req: Request, res: Response) => {
   res.json(LogoutMobileSessionResponse.parse({ success: true }));
 });
 
-<<<<<<< HEAD
 router.delete("/account", async (req: Request, res: Response) => {
   if (!req.isAuthenticated()) {
     res.status(401).json({ error: "Not authenticated" });
@@ -300,6 +294,4 @@ router.delete("/account", async (req: Request, res: Response) => {
   res.json(DeleteAccountResponse.parse({ success: true }));
 });
 
-=======
->>>>>>> origin/main
 export default router;

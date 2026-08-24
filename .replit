@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-modules = ["nodejs-24", "postgresql-16"]
-=======
 modules = ["nodejs-24", "python-3.11", "postgresql-16"]
->>>>>>> origin/main
 
 [deployment]
 router = "application"
@@ -156,11 +152,7 @@ externalPort = 80
 
 [[ports]]
 localPort = 8082
-<<<<<<< HEAD
 externalPort = 3003
-=======
-externalPort = 3001
->>>>>>> origin/main
 
 [[ports]]
 localPort = 18115
@@ -170,10 +162,6 @@ externalPort = 3000
 localPort = 18116
 externalPort = 4200
 
-<<<<<<< HEAD
-[nix]
-channel = "stable-25_05"
-=======
 [[ports]]
 localPort = 19679
 externalPort = 5000
@@ -193,4 +181,3 @@ Empiri = "91209120"
 
 [userenv.production]
 Empiri = "91209120"
->>>>>>> origin/main

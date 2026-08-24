@@ -1,44 +1,3 @@
-<<<<<<< HEAD
-const colors = {
-  light: {
-    text: "#E8EAF0",
-    tint: "#00D9FF",
-
-    background: "#050A0F",
-    foreground: "#E8EAF0",
-
-    card: "#0D1B2A",
-    cardForeground: "#E8EAF0",
-
-    primary: "#00D9FF",
-    primaryForeground: "#050A0F",
-
-    secondary: "#7B2FBE",
-    secondaryForeground: "#E8EAF0",
-
-    muted: "#0D1B2A",
-    mutedForeground: "#4A5568",
-
-    accent: "#00D9FF",
-    accentForeground: "#050A0F",
-
-    destructive: "#FF6B6B",
-    destructiveForeground: "#ffffff",
-
-    border: "#0D1B2A",
-    input: "#0D1B2A",
-
-    islandBg: "#0A0A0F",
-    islandGlow: "#00D9FF",
-
-    stateIdle: "#00D9FF",
-    stateListening: "#FF8C42",
-    stateThinking: "#7B2FBE",
-    stateResponding: "#00E676",
-    stateHappy: "#FFD700",
-  },
-  radius: 16,
-=======
 /**
  * Semantic design tokens for Empiri — a living, Apple-Intelligence-style presence.
  *
@@ -101,6 +60,8 @@ const colors = {
     userBubble: ["#5B8CFF", "#A855F7"] as const,
     userBubbleBorder: "rgba(124,58,237,0.0)",
     userBubbleText: "#FFFFFF",
+    islandBg: "#F8F7FF",
+    islandGlow: "#A855F7",
   },
 
   dark: {
@@ -143,11 +104,12 @@ const colors = {
     userBubble: ["rgba(91,140,255,0.30)", "rgba(168,85,247,0.30)"] as const,
     userBubbleBorder: "rgba(140,170,255,0.45)",
     userBubbleText: "#FFFFFF",
+    islandBg: "#F8F7FF",
+    islandGlow: "#A855F7",
   },
 
   // Border radius (in px) for cards, buttons, inputs.
   radius: 24,
->>>>>>> origin/main
 };
 
 export default colors;

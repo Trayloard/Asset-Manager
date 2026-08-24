@@ -2,7 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import {
   ListConversationsResponse,
   CreateConversationBody,
-  CreateConversationResponse,
+  GetConversationResponse,
   GetConversationMessagesParams,
   GetConversationMessagesResponse,
   SaveConversationMessageParams,
@@ -27,7 +27,7 @@ export async function getOwnedConversation(userId: string, conversationId: numbe
     .where(
       and(
         eq(conversations.id, conversationId),
-        eq(conversations.userId, userId),
+        eq(conversations.ownerId, userId),
       ),
     )
     .limit(1);
@@ -43,17 +43,19 @@ router.get("/conversations", async (req: Request, res: Response) => {
   const rows = await db
     .select()
     .from(conversations)
-    .where(eq(conversations.userId, req.user.id))
+    .where(eq(conversations.ownerId, req.user.id))
     .orderBy(desc(conversations.createdAt), desc(conversations.id));
 
   res.json(
-    ListConversationsResponse.parse({
-      conversations: rows.map((c) => ({
+    ListConversationsResponse.parse(
+      rows.map((c) => ({
         id: c.id,
         title: c.title,
-        createdAt: c.createdAt.getTime(),
+        createdAt: c.createdAt,
+        lastMessageText: null,
+        lastMessageAt: null,
       })),
-    }),
+    ),
   );
 });
 
@@ -71,16 +73,16 @@ router.post("/conversations", async (req: Request, res: Response) => {
 
   const [created] = await db
     .insert(conversations)
-    .values({ userId: req.user.id, title: parsed.data.title ?? DEFAULT_TITLE })
+    .values({ ownerId: req.user.id, title: parsed.data.title ?? DEFAULT_TITLE })
     .returning();
 
   res.json(
-    CreateConversationResponse.parse({
-      conversation: {
-        id: created.id,
-        title: created.title,
-        createdAt: created.createdAt.getTime(),
-      },
+    GetConversationResponse.parse({
+      id: created.id,
+      title: created.title,
+      createdAt: created.createdAt,
+      lastMessageText: null,
+      lastMessageAt: null,
     }),
   );
 });

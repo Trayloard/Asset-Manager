@@ -1,16 +1,4 @@
-<<<<<<< HEAD
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
-=======
-import React, {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  useCallback,
-  useMemo,
-  type ReactNode,
-} from "react";
->>>>>>> origin/main
 import * as AuthSession from "expo-auth-session";
 import * as Crypto from "expo-crypto";
 import * as WebBrowser from "expo-web-browser";
@@ -35,10 +23,7 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   login: () => Promise<void>;
   logout: () => Promise<void>;
-<<<<<<< HEAD
   deleteAccount: () => Promise<void>;
-=======
->>>>>>> origin/main
 }
 
 const AuthContext = createContext<AuthContextValue>({
@@ -47,10 +32,7 @@ const AuthContext = createContext<AuthContextValue>({
   isAuthenticated: false,
   login: async () => {},
   logout: async () => {},
-<<<<<<< HEAD
   deleteAccount: async () => {},
-=======
->>>>>>> origin/main
 });
 
 function getApiBaseUrl(): string {
@@ -71,10 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const discovery = AuthSession.useAutoDiscovery(ISSUER_URL);
 
   const redirectUri = AuthSession.makeRedirectUri();
-<<<<<<< HEAD
 
-=======
->>>>>>> origin/main
   const nonce = useMemo(() => Crypto.randomUUID(), []);
 
   const [request, response, promptAsync] = AuthSession.useAuthRequest(
@@ -189,7 +168,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-<<<<<<< HEAD
   const deleteAccount = useCallback(async () => {
     const token = await SecureStore.getItemAsync(AUTH_TOKEN_KEY);
     if (token) {
@@ -208,8 +186,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
-=======
->>>>>>> origin/main
   return (
     <AuthContext.Provider
       value={{
@@ -218,10 +194,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!user,
         login,
         logout,
-<<<<<<< HEAD
         deleteAccount,
-=======
->>>>>>> origin/main
       }}
     >
       {children}

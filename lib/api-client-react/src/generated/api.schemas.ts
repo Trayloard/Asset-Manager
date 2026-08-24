@@ -47,103 +47,6 @@ export const LogoutSuccessValue = {
 } as const;
 export type LogoutSuccess = typeof LogoutSuccessValue;
 
-<<<<<<< HEAD
-export type ConversationMessageRole = typeof ConversationMessageRole[keyof typeof ConversationMessageRole];
-
-
-export const ConversationMessageRole = {
-  user: 'user',
-  assistant: 'assistant',
-} as const;
-
-export interface ConversationMessage {
-  id: string;
-  role: ConversationMessageRole;
-  content: string;
-  /** Unix timestamp in milliseconds. */
-  timestamp: number;
-}
-
-export interface ConversationEnvelope {
-  messages: ConversationMessage[];
-}
-
-export interface ConversationSummary {
-  id: number;
-  title: string;
-  /** Unix timestamp in milliseconds. */
-  createdAt: number;
-}
-
-export interface ConversationListEnvelope {
-  conversations: ConversationSummary[];
-}
-
-export interface ConversationDetailEnvelope {
-  conversation: ConversationSummary;
-}
-
-export interface CreateConversationRequest {
-  /** @minLength 1 */
-  title?: string;
-}
-
-export type SaveMessageRequestRole = typeof SaveMessageRequestRole[keyof typeof SaveMessageRequestRole];
-
-
-export const SaveMessageRequestRole = {
-  user: 'user',
-  assistant: 'assistant',
-} as const;
-
-export interface SaveMessageRequest {
-  role: SaveMessageRequestRole;
-  /** @minLength 1 */
-  content: string;
-}
-
-export interface SaveMessageResponse {
-  message: ConversationMessage;
-}
-
-export const ClearConversationSuccessValue = {
-  success: true,
-} as const;
-export type ClearConversationSuccess = typeof ClearConversationSuccessValue;
-
-export const DeleteAccountSuccessValue = {
-  success: true,
-} as const;
-export type DeleteAccountSuccess = typeof DeleteAccountSuccessValue;
-
-export interface CompanionSettings {
-  name: string;
-  tone: string;
-  /** @nullable */
-  personalityNote: string | null;
-}
-
-export interface CompanionSettingsEnvelope {
-  settings: CompanionSettings;
-}
-
-export interface UpdateCompanionSettingsRequest {
-  /**
-     * @minLength 1
-     * @maxLength 40
-     */
-  name: string;
-  /** @minLength 1 */
-  tone: string;
-  /**
-     * @maxLength 280
-     * @nullable
-     */
-  personalityNote?: string | null;
-}
-
-export interface ErrorEnvelope {
-=======
 export interface ErrorEnvelope {
   error: string;
 }
@@ -153,9 +56,9 @@ export interface Conversation {
   title: string;
   createdAt: string;
   /** @nullable */
-  lastMessageText: string | null;
+  lastMessageText?: string | null;
   /** @nullable */
-  lastMessageAt: string | null;
+  lastMessageAt?: string | null;
 }
 
 export interface ConversationInput {
@@ -296,18 +199,9 @@ export interface CompanionChapter {
   text: string;
   /** Core themes of the period (normalized topic keys). */
   themes: string[];
-  /**
-   * The raw narrative lines that were condensed into this chapter. Present
-   * only for chapters written after this field was introduced; omitted for
-   * older chapters (show only the chapter text in that case).
-   */
+  /** Optional source lines that grounded this chapter. */
   sourceLines?: string[];
-  /**
-   * Epoch ms of the earliest moment a memory in this chapter was originally
-   * written. Prefer this over `from` for display — it reflects when the
-   * memory was made, not when it was filed. Absent for older chapters; fall
-   * back to `from`.
-   */
+  /** Optional representative epoch ms for the chapter memory. */
   memoryDate?: number;
 }
 
@@ -410,8 +304,94 @@ export interface CompanionSettingsInput {
 }
 
 export interface ApiError {
->>>>>>> origin/main
   error: string;
+}
+
+export type ConversationMessageRole = typeof ConversationMessageRole[keyof typeof ConversationMessageRole];
+
+
+export const ConversationMessageRole = {
+  user: 'user',
+  assistant: 'assistant',
+} as const;
+
+export interface ConversationMessage {
+  id: string;
+  role: ConversationMessageRole;
+  content: string;
+  /** Unix timestamp in milliseconds. */
+  timestamp: number;
+}
+
+export interface ConversationEnvelope {
+  messages: ConversationMessage[];
+}
+
+export interface ConversationSummary {
+  id: number;
+  title: string;
+  /** Unix timestamp in milliseconds. */
+  createdAt: number;
+}
+
+export interface ConversationListEnvelope {
+  conversations: ConversationSummary[];
+}
+
+export interface ConversationDetailEnvelope {
+  conversation: ConversationSummary;
+}
+
+export interface CreateConversationRequest {
+  /** @minLength 1 */
+  title?: string;
+}
+
+export type SaveMessageRequestRole = typeof SaveMessageRequestRole[keyof typeof SaveMessageRequestRole];
+
+
+export const SaveMessageRequestRole = {
+  user: 'user',
+  assistant: 'assistant',
+} as const;
+
+export interface SaveMessageRequest {
+  role: SaveMessageRequestRole;
+  /** @minLength 1 */
+  content: string;
+}
+
+export interface SaveMessageResponse {
+  message: ConversationMessage;
+}
+
+export const ClearConversationSuccessValue = {
+  success: true,
+} as const;
+export type ClearConversationSuccess = typeof ClearConversationSuccessValue;
+
+export const DeleteAccountSuccessValue = {
+  success: true,
+} as const;
+export type DeleteAccountSuccess = typeof DeleteAccountSuccessValue;
+
+export interface CompanionSettingsEnvelope {
+  settings: CompanionSettings;
+}
+
+export interface UpdateCompanionSettingsRequest {
+  /**
+     * @minLength 1
+     * @maxLength 40
+     */
+  name: string;
+  /** @minLength 1 */
+  tone: string;
+  /**
+     * @maxLength 280
+     * @nullable
+     */
+  personalityNote?: string | null;
 }
 
 /**
@@ -431,10 +411,3 @@ code?: string;
 state?: string;
 iss?: string;
 };
-
-<<<<<<< HEAD
-=======
-export type CompanionSettingsEnvelope = CompanionSettings;
-export type UpdateCompanionSettingsRequest = CompanionSettingsInput;
-
->>>>>>> origin/main

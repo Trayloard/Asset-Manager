@@ -1,8 +1,6 @@
-<<<<<<< HEAD
 - [Integration lib dist gitignored](integration-lib-dist.md) — composite libs keep `dist/*.d.ts` out of git; a newly-restored lib breaks downstream typecheck (TS6305) until you run `tsc -b lib/<pkg>`.
 - [Codegen vs Metro transient resolve](codegen-metro-transient-resolve.md) — after api-spec codegen (orval `clean:true`), Metro may log "Unable to resolve ./generated/api"; harmless, clears on expo restart.
 - [Sessions not FK-linked to users](session-user-cascade.md) — deleting a user doesn't invalidate their sessions (user stored in `sess` JSONB, no FK); cleanup must delete sessions explicitly.
-=======
 - [Voice on Expo mobile](voice-on-expo.md) — record with expo-audio + base64 to your own OpenAI STT/TTS endpoints; MediaRecorder web libs don't work in RN; native-first, web degrades.
 - [expo-audio metering API](expo-audio-metering.md) — metering lives on RecorderState (recorder.getStatus()), NOT on RecordingStatus (statusListener callback type); poll getStatus() every ~120 ms, wrap in try/catch for Jest.
 - [Monorepo typecheck gotchas](monorepo-typecheck-gotchas.md) — root typecheck is now green and gated by a validation command; per-package runs mislead, rebuild libs first.
@@ -28,4 +26,3 @@
 - [Meaning-based curiosity grouping](interest-theme-grouping.md) — themes are LLM-computed server-side, cached by topic-set signature; JSONB rejects \u0000; gpt-5-mini needs ≥4096 completion tokens.
 - [Task specs may assume unmerged features](task-specs-unmerged-features.md) — isolated-env tasks can describe behavior as "now" existing that isn't in this checkout; verify with grep and implement it if missing.
 - [Mobile typecheck JSX compat shim](mobile-jsx-compat-shim.md) — expo-blur/expo-linear-gradient/react-native-svg JSX type errors fixed with types/module-overrides.d.ts; global fixed with types/node-global.d.ts; skipLibCheck:true in mobile tsconfig.
->>>>>>> origin/main

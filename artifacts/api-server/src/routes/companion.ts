@@ -993,12 +993,31 @@ router.get("/companion-settings", async (req, res) => {
   const [created] = await db
     .insert(companionSettings)
     .values({ userId: req.user.id })
+    .onConflictDoNothing({
+      target: companionSettings.userId,
+    })
     .returning();
+  if (created) {
+    res.json({
+      companionName: created.companionName,
+      tone: created.tone,
+      personalityNote: created.personalityNote,
+    });
+    return;
+  }
 
+  const [winner] = await db
+    .select()
+    .from(companionSettings)
+    .where(eq(companionSettings.userId, req.user.id))
+    .limit(1);
+  if (!winner) {
+    throw new Error(`Failed to resolve companion settings for user ${req.user.id}`);
+  }
   res.json({
-    companionName: created.companionName,
-    tone: created.tone,
-    personalityNote: created.personalityNote,
+    companionName: winner.companionName,
+    tone: winner.tone,
+    personalityNote: winner.personalityNote,
   });
 });
 

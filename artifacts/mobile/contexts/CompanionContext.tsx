@@ -286,6 +286,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const perceptsRef = useRef<Percept[]>([]);
   const lastShakeAtRef = useRef<number | null>(null);
   const batteryLowReportedRef = useRef<boolean>(false);
+  const sendLockRef = useRef(false);
   // HIGH_QUALITY gives better results with background noise and non-English
   // speech (e.g. German). ~128 kbps AAC; a 20-second clip ≈ 320 KB, well
   // under the 50 MB body limit on the API server.
@@ -877,6 +878,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       const content = raw.trim();
       const id = conversationIdRef.current;
       if (!content || id == null) return;
+      if (sendLockRef.current) return;
+      sendLockRef.current = true;
 
       const optimistic: Message = {
         id: tempId(),
@@ -886,7 +889,11 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         createdAt: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, optimistic]);
-      await deliver(content, optimistic, id);
+      try {
+        await deliver(content, optimistic, id);
+      } finally {
+        sendLockRef.current = false;
+      }
     },
     [deliver],
   );

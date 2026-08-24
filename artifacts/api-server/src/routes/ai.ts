@@ -1,12 +1,12 @@
-import { openai } from "@workspace/integrations-openai-ai-server";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, conversations, messages, companionSettings } from "@workspace/db";
-import { asc, eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 
 import { buildCompanionSystemPrompt } from "../lib/companionPrompt";
 import { DEFAULT_TITLE, getOwnedConversation } from "./conversations";
 
 const router: IRouter = Router();
+const MAX_HISTORY_MESSAGES = 40;
 
 router.post("/ai/chat", async (req: Request, res: Response) => {
   if (!req.isAuthenticated()) {
@@ -79,11 +79,14 @@ router.post("/ai/chat", async (req: Request, res: Response) => {
       .where(eq(conversations.id, conversation.id));
   }
 
-  const history = await db
-    .select()
-    .from(messages)
-    .where(eq(messages.conversationId, conversation.id))
-    .orderBy(asc(messages.createdAt), asc(messages.id));
+  const history = (
+    await db
+      .select()
+      .from(messages)
+      .where(eq(messages.conversationId, conversation.id))
+      .orderBy(desc(messages.createdAt), desc(messages.id))
+      .limit(MAX_HISTORY_MESSAGES)
+  ).reverse();
 
   const chatMessages: Array<{
     role: "system" | "user" | "assistant";
@@ -102,6 +105,7 @@ router.post("/ai/chat", async (req: Request, res: Response) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
 
   try {
+    const { openai } = await import("@workspace/integrations-openai-ai-server");
     const stream = await openai.chat.completions.create({
       model: "gpt-5.4",
       max_completion_tokens: 512,

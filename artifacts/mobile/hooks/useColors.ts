@@ -6,6 +6,7 @@ import colors from "@/constants/colors";
  * Returns the design tokens for the current color scheme.
  *
  * The returned object contains all color tokens for the active palette
+<<<<<<< HEAD
  * plus scheme-independent values like `radius`.
  *
  * Falls back to the light palette when no dark key is defined in
@@ -20,5 +21,13 @@ export function useColors() {
     scheme === "dark" && "dark" in colors
       ? (colors as Record<string, typeof colors.light>).dark
       : colors.light;
+=======
+ * (including the living-presence tokens: glass surfaces, the iridescent
+ * spectrum, and ambient colors) plus scheme-independent values like `radius`.
+ */
+export function useColors() {
+  const scheme = useColorScheme();
+  const palette = scheme === "dark" ? colors.dark : colors.light;
+>>>>>>> origin/main
   return { ...palette, radius: colors.radius };
 }

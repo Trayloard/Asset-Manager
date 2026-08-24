@@ -6,10 +6,15 @@
  * OpenAPI spec version: 0.1.0
  */
 
+<<<<<<< HEAD
+=======
+export * from './apiError';
+>>>>>>> origin/main
 export * from './authorizationSessionHeaderParameter';
 export * from './authUser';
 export * from './authUserEnvelope';
 export * from './beginBrowserLoginParams';
+<<<<<<< HEAD
 export * from './clearConversationSuccess';
 export * from './companionSettings';
 export * from './companionSettingsEnvelope';
@@ -21,13 +26,48 @@ export * from './conversationMessageRole';
 export * from './conversationSummary';
 export * from './createConversationRequest';
 export * from './deleteAccountSuccess';
+=======
+export * from './checkInInput';
+export * from './companionChapter';
+export * from './companionDrive';
+export * from './companionFact';
+export * from './companionInterest';
+export * from './companionMemory';
+export * from './companionSelf';
+export * from './companionSelfHistory';
+export * from './companionSelfSnapshot';
+export * from './companionSelfThemes';
+export * from './companionSettings';
+export * from './companionSettingsInput';
+export * from './companionSettingsInputTone';
+export * from './companionSettingsTone';
+export * from './companionTrait';
+export * from './conversation';
+export * from './conversationInput';
+export * from './conversationUpdate';
+>>>>>>> origin/main
 export * from './errorEnvelope';
 export * from './handleBrowserLoginCallbackParams';
 export * from './healthStatus';
 export * from './logoutSuccess';
+<<<<<<< HEAD
 export * from './mobileTokenExchangeRequest';
 export * from './mobileTokenExchangeSuccess';
 export * from './saveMessageRequest';
 export * from './saveMessageRequestRole';
 export * from './saveMessageResponse';
 export * from './updateCompanionSettingsRequest';
+=======
+export * from './message';
+export * from './messageInput';
+export * from './mobileTokenExchangeRequest';
+export * from './mobileTokenExchangeSuccess';
+export * from './percept';
+export * from './perceptKind';
+export * from './sendMessageResult';
+export * from './speechInput';
+export * from './speechResult';
+export * from './transcribeInput';
+export * from './transcribeResult';
+export * from './updateCompanionMemoryInput';
+>>>>>>> origin/main

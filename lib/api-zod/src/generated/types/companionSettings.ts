@@ -5,10 +5,22 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+<<<<<<< HEAD
 
 export interface CompanionSettings {
   name: string;
   tone: string;
   /** @nullable */
   personalityNote: string | null;
+=======
+import type { CompanionSettingsTone } from './companionSettingsTone';
+
+export interface CompanionSettings {
+  /** The name the user has given their companion. */
+  companionName: string;
+  /** Conversation tone preset. */
+  tone: CompanionSettingsTone;
+  /** A free-text note the user wants the companion to know about them. */
+  personalityNote: string;
+>>>>>>> origin/main
 }

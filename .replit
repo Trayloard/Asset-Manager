@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 modules = ["nodejs-24", "postgresql-16"]
+=======
+modules = ["nodejs-24", "python-3.11", "postgresql-16"]
+>>>>>>> origin/main
 
 [deployment]
 router = "application"
@@ -11,6 +15,130 @@ env = { "CI" = "true" }
 [workflows]
 runButton = "Project"
 
+[[workflows.workflow]]
+name = "artifacts/launch-video: web"
+author = "agent"
+mode = "sequential"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+artifactId = "artifacts/launch-video"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/launch-video run dev"
+cwd = "./artifacts/launch-video"
+waitForPort = 19679
+ensurePreviewReachable = "/"
+router = "path"
+
+[workflows.workflow.tasks.env]
+PORT = "19679"
+BASE_PATH = "/launch-video/"
+
+[[workflows.workflow]]
+name = "artifacts/mobile: expo"
+author = "agent"
+mode = "sequential"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+artifactId = "artifacts/mobile"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/mobile run dev"
+cwd = "./artifacts/mobile"
+waitForPort = 18115
+ensurePreviewReachable = "/status"
+router = "expo-domain"
+
+[workflows.workflow.tasks.env]
+PORT = "18115"
+BASE_PATH = "/"
+
+[[workflows.workflow]]
+name = "artifacts/api-server: API Server"
+author = "agent"
+mode = "sequential"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+artifactId = "3B4_FFSkEVBkAeYMFRJ2e"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run dev"
+cwd = "./artifacts/api-server"
+waitForPort = 8080
+ensurePreviewReachable = "/"
+router = "path"
+
+[workflows.workflow.tasks.env]
+PORT = "8080"
+
+[[workflows.workflow]]
+name = "artifacts/mockup-sandbox: Component Preview Server"
+author = "agent"
+mode = "sequential"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+artifactId = "XegfDyZt7HqfW2Bb8Ghoy"
+isCanvasWorkflow = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/mockup-sandbox run dev"
+cwd = "./artifacts/mockup-sandbox"
+waitForPort = 8081
+ensurePreviewReachable = "/"
+router = "path"
+
+[workflows.workflow.tasks.env]
+PORT = "8081"
+BASE_PATH = "/__mockup"
+
+[[workflows.workflow]]
+name = "test"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm install --frozen-lockfile && pnpm test"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "Empiri app"
+mode = "sequential"
+author = 58120139
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "test"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "typecheck"
+
+[[workflows.workflow]]
+name = "typecheck"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm run typecheck"
+
+[workflows.workflow.metadata]
+isValidation = true
+
 [agent]
 stack = "PNPM_WORKSPACE"
 expertMode = true
@@ -21,7 +149,6 @@ timeoutMs = 20000
 
 [[ports]]
 localPort = 8080
-externalPort = 8080
 
 [[ports]]
 localPort = 8081
@@ -29,7 +156,11 @@ externalPort = 80
 
 [[ports]]
 localPort = 8082
+<<<<<<< HEAD
 externalPort = 3003
+=======
+externalPort = 3001
+>>>>>>> origin/main
 
 [[ports]]
 localPort = 18115
@@ -39,5 +170,27 @@ externalPort = 3000
 localPort = 18116
 externalPort = 4200
 
+<<<<<<< HEAD
 [nix]
 channel = "stable-25_05"
+=======
+[[ports]]
+localPort = 19679
+externalPort = 5000
+
+[nix]
+channel = "stable-25_05"
+
+[objectStorage]
+defaultBucketID = "replit-objstore-0ca444a8-1ec6-48a4-9b1f-0ca78ce299c5"
+
+[userenv]
+
+[userenv.development]
+Empiri = "91209120"
+
+[userenv.shared]
+
+[userenv.production]
+Empiri = "91209120"
+>>>>>>> origin/main

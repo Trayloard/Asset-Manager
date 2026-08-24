@@ -10,12 +10,21 @@ servers:
 tags:
   - name: health
     description: Health operations
+<<<<<<< HEAD
   - name: Auth
     description: Browser and mobile authentication endpoints.
   - name: Conversations
     description: Persisted per-user conversation history.
   - name: Companion
     description: Per-user companion personalization settings.
+=======
+  - name: companion
+    description: Companion chat operations
+  - name: voice
+    description: Voice transcription and speech operations
+  - name: Auth
+    description: Browser and mobile authentication endpoints.
+>>>>>>> origin/main
 paths:
   /healthz:
     get:
@@ -148,6 +157,7 @@ paths:
                 $ref: '#/components/schemas/LogoutSuccess'
   /conversations:
     get:
+<<<<<<< HEAD
       tags: [Conversations]
       operationId: listConversations
       summary: List the authenticated user's conversations
@@ -229,11 +239,37 @@ paths:
         - $ref: '#/components/parameters/AuthorizationSessionHeader'
         - $ref: '#/components/parameters/SessionCookie'
         - $ref: '#/components/parameters/ConversationIdPath'
+=======
+      operationId: listConversations
+      tags: [companion]
+      summary: List the signed-in user's conversations
+      description: Returns the conversations owned by the authenticated user, oldest first. Used to resume an existing conversation on a fresh install or new device.
+      responses:
+        "200":
+          description: The user's conversations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Conversation"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    post:
+      operationId: createConversation
+      tags: [companion]
+      summary: Create a new conversation
+>>>>>>> origin/main
       requestBody:
         required: true
         content:
           application/json:
             schema:
+<<<<<<< HEAD
               $ref: '#/components/schemas/SaveMessageRequest'
       responses:
         '200':
@@ -314,10 +350,414 @@ paths:
       tags: [Companion]
       operationId: getCompanionSettings
       summary: Load the authenticated user's companion settings
+=======
+              $ref: "#/components/schemas/ConversationInput"
+      responses:
+        "201":
+          description: Created conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /conversations/{id}:
+    get:
+      operationId: getConversation
+      tags: [companion]
+      summary: Fetch a single conversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    patch:
+      operationId: renameConversation
+      tags: [companion]
+      summary: Rename a conversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConversationUpdate"
+      responses:
+        "200":
+          description: The updated conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /conversations/{id}/messages:
+    get:
+      operationId: listMessages
+      tags: [companion]
+      summary: List messages in a conversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Message"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    post:
+      operationId: sendMessage
+      tags: [companion]
+      summary: Send a text message and receive the companion's reply
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MessageInput"
+      responses:
+        "200":
+          description: The persisted user message and the companion's reply
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendMessageResult"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "502":
+          description: The companion failed to generate a reply
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /conversations/{id}/checkin:
+    post:
+      operationId: companionCheckIn
+      tags: [companion]
+      summary: Generate a proactive companion check-in greeting
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckInInput"
+      responses:
+        "200":
+          description: The persisted proactive greeting from the companion
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "502":
+          description: The companion failed to generate a greeting
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /conversations/{id}/self:
+    get:
+      operationId: getCompanionSelf
+      tags: [companion]
+      summary: Get the companion's current inner self
+      description: Returns a friendly summary of the companion's evolving inner self (drives, traits, interests, and self-narrative) for the given conversation.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The companion's current inner-self summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanionSelf"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /conversations/{id}/self/history:
+    get:
+      operationId: getCompanionSelfHistory
+      tags: [companion]
+      summary: Get how the companion has grown over time
+      description: Returns the timeline of inner-self snapshots (drives, traits, and emerging curiosities) captured over the life of the conversation, oldest first. Capped to the most recent snapshots so very long-lived timelines stay fast.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The companion's inner-self snapshot timeline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanionSelfHistory"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /conversations/{id}/memory:
+    get:
+      operationId: getCompanionMemory
+      tags: [companion]
+      summary: Get what the companion remembers about the conversation
+      description: Returns the rolling context summary of earlier messages that have slid out of the live window, or null if nothing has been summarised yet.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The companion's current memory of earlier messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanionMemory"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    patch:
+      operationId: updateCompanionMemory
+      tags: [companion]
+      summary: Edit what the companion remembers about the conversation
+      description: Replaces the rolling context summary with user-provided text so the user can correct or trim what the companion recalls.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCompanionMemoryInput"
+      responses:
+        "200":
+          description: The updated memory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanionMemory"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    delete:
+      operationId: clearCompanionMemory
+      tags: [companion]
+      summary: Clear what the companion remembers about the conversation
+      description: Removes the stored rolling context summary and resets the summariser watermark, returning the memory to its empty state.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The cleared memory (summary is null)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanionMemory"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /voice/transcribe:
+    post:
+      operationId: transcribeAudio
+      tags: [voice]
+      summary: Transcribe recorded audio into text
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TranscribeInput"
+      responses:
+        "200":
+          description: Transcribed text
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscribeResult"
+        "422":
+          description: No speech could be detected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "502":
+          description: Transcription failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /companion-settings:
+    get:
+      operationId: getCompanionSettings
+      tags: [companion]
+      summary: Get the companion personalisation settings for the current user
+      description: Returns stored settings, creating defaults on first call.
+>>>>>>> origin/main
       parameters:
         - $ref: '#/components/parameters/AuthorizationSessionHeader'
         - $ref: '#/components/parameters/SessionCookie'
       responses:
+<<<<<<< HEAD
         '200':
           description: Companion settings loaded successfully.
           content:
@@ -334,6 +774,24 @@ paths:
       tags: [Companion]
       operationId: updateCompanionSettings
       summary: Update the authenticated user's companion settings
+=======
+        "200":
+          description: Current companion settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanionSettings"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    put:
+      operationId: updateCompanionSettings
+      tags: [companion]
+      summary: Save companion personalisation settings
+>>>>>>> origin/main
       parameters:
         - $ref: '#/components/parameters/AuthorizationSessionHeader'
         - $ref: '#/components/parameters/SessionCookie'
@@ -342,6 +800,7 @@ paths:
         content:
           application/json:
             schema:
+<<<<<<< HEAD
               $ref: '#/components/schemas/UpdateCompanionSettingsRequest'
       responses:
         '200':
@@ -362,6 +821,52 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+=======
+              $ref: "#/components/schemas/CompanionSettingsInput"
+      responses:
+        "200":
+          description: Updated companion settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanionSettings"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /voice/speech:
+    post:
+      operationId: synthesizeSpeech
+      tags: [voice]
+      summary: Convert text into spoken audio
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SpeechInput"
+      responses:
+        "200":
+          description: Base64-encoded spoken audio
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpeechResult"
+        "502":
+          description: Speech synthesis failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+>>>>>>> origin/main
 components:
   parameters:
     AuthorizationSessionHeader:
@@ -378,6 +883,7 @@ components:
       description: Browser session cookie.
       schema:
         type: string
+<<<<<<< HEAD
     ConversationIdPath:
       name: conversationId
       in: path
@@ -385,6 +891,8 @@ components:
       description: Numeric id of the conversation.
       schema:
         type: integer
+=======
+>>>>>>> origin/main
   schemas:
     HealthStatus:
       type: object
@@ -449,6 +957,7 @@ components:
         success:
           type: boolean
           const: true
+<<<<<<< HEAD
     ConversationMessage:
       type: object
       required: [id, role, content, timestamp]
@@ -562,9 +1071,383 @@ components:
         personalityNote:
           type: [string, 'null']
           maxLength: 280
+=======
+>>>>>>> origin/main
     ErrorEnvelope:
       type: object
       required: [error]
       properties:
         error:
           type: string
+<<<<<<< HEAD
+=======
+    Conversation:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - title
+        - createdAt
+    ConversationInput:
+      type: object
+      properties:
+        title:
+          type: string
+      required:
+        - title
+    ConversationUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 80
+      required:
+        - title
+    Message:
+      type: object
+      properties:
+        id:
+          type: integer
+        conversationId:
+          type: integer
+        role:
+          type: string
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - conversationId
+        - role
+        - content
+        - createdAt
+    Percept:
+      type: object
+      description: One gentle, privacy-safe moment of device perception (opt-in only).
+      properties:
+        kind:
+          type: string
+          enum: [shake, charging, battery_low, daypart]
+        intensity:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: How salient the moment felt, 0-1
+        at:
+          type: number
+          description: When it happened (epoch milliseconds, client clock)
+        detail:
+          type: string
+          maxLength: 32
+          description: Optional qualifier, e.g. the daypart bucket ("late_night")
+      required:
+        - kind
+        - intensity
+        - at
+    MessageInput:
+      type: object
+      properties:
+        content:
+          type: string
+          minLength: 1
+        percepts:
+          type: array
+          maxItems: 8
+          items:
+            $ref: "#/components/schemas/Percept"
+          description: Device percepts sensed since the last send (opt-in senses only)
+      required:
+        - content
+    SendMessageResult:
+      type: object
+      properties:
+        userMessage:
+          $ref: "#/components/schemas/Message"
+        assistantMessage:
+          $ref: "#/components/schemas/Message"
+      required:
+        - userMessage
+        - assistantMessage
+    CheckInInput:
+      type: object
+      properties:
+        hoursAway:
+          type: number
+          description: Approximate hours since the user last interacted
+        mood:
+          type: string
+          description: The companion's current mood label (e.g. sleepy, happy, bright)
+        missingYou:
+          type: number
+          description: How much the companion has been missing the user, 0-100
+        percepts:
+          type: array
+          maxItems: 8
+          items:
+            $ref: "#/components/schemas/Percept"
+          description: Device percepts sensed since the last send (opt-in senses only)
+      required:
+        - hoursAway
+        - mood
+    TranscribeInput:
+      type: object
+      properties:
+        audio:
+          type: string
+          description: Base64-encoded audio data
+        format:
+          type: string
+          description: Source audio container/extension hint (e.g. m4a, wav, webm)
+      required:
+        - audio
+    TranscribeResult:
+      type: object
+      properties:
+        text:
+          type: string
+      required:
+        - text
+    SpeechInput:
+      type: object
+      properties:
+        text:
+          type: string
+          minLength: 1
+      required:
+        - text
+    SpeechResult:
+      type: object
+      properties:
+        audio:
+          type: string
+          description: Base64-encoded MP3 audio
+        format:
+          type: string
+      required:
+        - audio
+        - format
+    CompanionDrive:
+      type: object
+      properties:
+        key:
+          type: string
+        level:
+          type: number
+        striving:
+          type: number
+      required:
+        - key
+        - level
+        - striving
+    CompanionTrait:
+      type: object
+      properties:
+        key:
+          type: string
+        value:
+          type: number
+      required:
+        - key
+        - value
+    CompanionInterest:
+      type: object
+      properties:
+        topic:
+          type: string
+          description: Normalized, lowercased key — stable for matching/comparison.
+        display:
+          type: string
+          description: Best original casing for the topic (proper-noun aware), for display.
+        affinity:
+          type: number
+      required:
+        - topic
+        - display
+        - affinity
+    CompanionFact:
+      type: object
+      properties:
+        key:
+          type: string
+          description: Stable slot identifier (e.g. "dog_name") — a later update to the same slot replaces the text.
+        text:
+          type: string
+          description: The remembered statement, third-person ("Their dog is called Milo").
+        salience:
+          type: number
+          description: How firmly the fact is held right now (0-100); grows on re-mention, fades over time.
+      required:
+        - key
+        - text
+        - salience
+    CompanionChapter:
+      type: object
+      properties:
+        from:
+          type: number
+          description: Epoch ms of the earliest moment the chapter covers.
+        to:
+          type: number
+          description: Epoch ms of the latest moment the chapter covers.
+        text:
+          type: string
+          description: The condensed chapter text, second person ("Back then you…").
+        themes:
+          type: array
+          description: Core themes of the period (normalized topic keys).
+          items:
+            type: string
+      required:
+        - from
+        - to
+        - text
+        - themes
+    CompanionSelf:
+      type: object
+      properties:
+        drives:
+          type: array
+          items:
+            $ref: "#/components/schemas/CompanionDrive"
+        traits:
+          type: array
+          items:
+            $ref: "#/components/schemas/CompanionTrait"
+        interests:
+          type: array
+          items:
+            $ref: "#/components/schemas/CompanionInterest"
+        narrative:
+          type: array
+          items:
+            type: string
+        facts:
+          type: array
+          description: Durable personal facts the companion remembers about the user, most salient first.
+          items:
+            $ref: "#/components/schemas/CompanionFact"
+        chapters:
+          type: array
+          description: The condensed life story so far — dated chapters, oldest first.
+          items:
+            $ref: "#/components/schemas/CompanionChapter"
+        interactions:
+          type: integer
+        ageHours:
+          type: number
+        themes:
+          type: [object, 'null']
+          description: Meaning-based grouping of curiosities, computed server-side — maps a normalized interest topic key to its theme label. Topics absent from the map stand alone. Null when grouping is temporarily unavailable.
+          additionalProperties:
+            type: string
+      required:
+        - drives
+        - traits
+        - interests
+        - narrative
+        - facts
+        - chapters
+        - interactions
+        - ageHours
+        - themes
+    CompanionSelfSnapshot:
+      type: object
+      properties:
+        capturedAt:
+          type: string
+          format: date-time
+        interactions:
+          type: integer
+        drives:
+          type: array
+          items:
+            $ref: "#/components/schemas/CompanionDrive"
+        traits:
+          type: array
+          items:
+            $ref: "#/components/schemas/CompanionTrait"
+        interests:
+          type: array
+          items:
+            $ref: "#/components/schemas/CompanionInterest"
+      required:
+        - capturedAt
+        - interactions
+        - drives
+        - traits
+        - interests
+    CompanionSelfHistory:
+      type: object
+      properties:
+        snapshots:
+          type: array
+          items:
+            $ref: "#/components/schemas/CompanionSelfSnapshot"
+      required:
+        - snapshots
+    CompanionMemory:
+      type: object
+      properties:
+        summary:
+          type: [string, 'null']
+          description: The rolling context summary of earlier messages, or null if nothing has been summarised yet.
+      required:
+        - summary
+    UpdateCompanionMemoryInput:
+      type: object
+      properties:
+        summary:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: The corrected summary text the companion should remember.
+      required:
+        - summary
+    CompanionSettings:
+      type: object
+      properties:
+        companionName:
+          type: string
+          description: The name the user has given their companion.
+        tone:
+          type: string
+          enum: [playful, calm, witty, wise, cheerful]
+          description: Conversation tone preset.
+        personalityNote:
+          type: string
+          description: A free-text note the user wants the companion to know about them.
+      required:
+        - companionName
+        - tone
+        - personalityNote
+    CompanionSettingsInput:
+      type: object
+      properties:
+        companionName:
+          type: string
+          minLength: 1
+          maxLength: 32
+        tone:
+          type: string
+          enum: [playful, calm, witty, wise, cheerful]
+        personalityNote:
+          type: string
+          maxLength: 500
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+>>>>>>> origin/main

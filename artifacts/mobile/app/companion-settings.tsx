@@ -1,231 +1,332 @@
-import React, { useState } from "react";
+import { Feather } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
+import { Redirect, useRouter } from "expo-router";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from "react-native";
-import { Feather } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { FONTS } from "@/constants/fonts";
+import { useCompanion } from "@/contexts/CompanionContext";
 import { useColors } from "@/hooks/useColors";
-import { useCompanion } from "@/context/CompanionContext";
+import { useAuth } from "@/lib/auth";
 
-const TONE_PRESETS: { id: string; label: string; blurb: string }[] = [
-  { id: "playful", label: "Playful", blurb: "Curious and full of whimsy" },
-  { id: "calm", label: "Calm", blurb: "Gentle and soothing" },
-  { id: "witty", label: "Witty", blurb: "Clever and quick with a joke" },
-  { id: "wise", label: "Wise", blurb: "Thoughtful and encouraging" },
-  { id: "cheerful", label: "Cheerful", blurb: "Upbeat and enthusiastic" },
+const TONE_OPTIONS = [
+  {
+    value: "calm" as const,
+    label: "Calm",
+    description: "Gentle, steady, and warm.",
+    icon: "cloud" as const,
+  },
+  {
+    value: "playful" as const,
+    label: "Playful",
+    description: "Lighthearted, fun, and full of wordplay.",
+    icon: "smile" as const,
+  },
+  {
+    value: "witty" as const,
+    label: "Witty",
+    description: "Clever and a little sharp.",
+    icon: "zap" as const,
+  },
+  {
+    value: "wise" as const,
+    label: "Wise",
+    description: "Thoughtful, reflective, and a bit philosophical.",
+    icon: "book-open" as const,
+  },
+  {
+    value: "cheerful" as const,
+    label: "Cheerful",
+    description: "Bright, uplifting, and encouraging.",
+    icon: "sun" as const,
+  },
 ];
 
-const NAME_MAX = 40;
-const NOTE_MAX = 280;
+type ToneValue = (typeof TONE_OPTIONS)[number]["value"];
 
 export default function CompanionSettingsScreen() {
+  const router = useRouter();
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const router = useRouter();
   const { settings, saveSettings } = useCompanion();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
 
-  const [name, setName] = useState(settings.name);
-  const [tone, setTone] = useState(settings.tone);
-  const [note, setNote] = useState(settings.personalityNote ?? "");
+  const [name, setName] = useState(settings?.companionName ?? "Empiri");
+  const [tone, setTone] = useState<ToneValue>(
+    (settings?.tone as ToneValue) ?? "calm",
+  );
+  const [note, setNote] = useState(settings?.personalityNote ?? "");
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
 
-  const handleBack = () => {
-    if (router.canGoBack()) {
-      router.back();
-    } else {
-      router.replace("/profile");
+  // Keep local state in sync when settings load (e.g. loaded async after render).
+  useEffect(() => {
+    if (settings) {
+      setName(settings.companionName);
+      setTone(settings.tone as ToneValue);
+      setNote(settings.personalityNote);
     }
-  };
-
-  const trimmedName = name.trim();
-  const canSave = trimmedName.length > 0 && !saving;
+  }, [settings]);
 
   const handleSave = async () => {
-    if (!canSave) return;
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setSaving(true);
-    setError(null);
     try {
       await saveSettings({
-        name: trimmedName,
+        companionName: name.trim() || "Empiri",
         tone,
-        personalityNote: note.trim() ? note.trim() : null,
+        personalityNote: note,
       });
-      handleBack();
-    } catch {
-      setError("Couldn't save your changes. Please try again.");
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
     } finally {
       setSaving(false);
     }
   };
 
+  // Same auth pattern as the main chat screen: wait for the auth check,
+  // then send signed-out users to the root screen, which shows the login gate.
+  if (authLoading) {
+    return (
+      <View style={[styles.root, styles.center, { backgroundColor: colors.background }]}>
+        <ActivityIndicator color={colors.primary} />
+      </View>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Redirect href="/" />;
+  }
+
   return (
-    <View style={[styles.screen, { backgroundColor: colors.background }]}>
+    <View style={[styles.root, { backgroundColor: colors.background }]}>
+      {/* Header */}
       <View
         style={[
           styles.header,
-          { paddingTop: insets.top + 8, borderBottomColor: colors.border },
+          {
+            paddingTop: insets.top + 10,
+            borderBottomColor: colors.border,
+          },
         ]}
       >
-        <TouchableOpacity
-          onPress={handleBack}
-          style={styles.backBtn}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        <Pressable
+          onPress={() => router.back()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          hitSlop={12}
+          style={({ pressed }) => [
+            styles.backBtn,
+            { backgroundColor: colors.muted, opacity: pressed ? 0.6 : 1 },
+          ]}
         >
-          <Feather name="chevron-left" size={24} color={colors.foreground} />
-        </TouchableOpacity>
+          <Feather name="arrow-left" size={20} color={colors.foreground} />
+        </Pressable>
+
         <Text style={[styles.headerTitle, { color: colors.foreground }]}>
-          Companion
+          Personalize
         </Text>
+
+        {/* Spacer to center title */}
         <View style={styles.backBtn} />
       </View>
 
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={insets.top + 56}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
         <ScrollView
           contentContainerStyle={[
             styles.content,
             { paddingBottom: insets.bottom + 32 },
           ]}
-          showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
+          {/* Name */}
           <View style={styles.section}>
             <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
-              Name
+              Name your companion
             </Text>
             <TextInput
               value={name}
               onChangeText={setName}
               placeholder="Empiri"
               placeholderTextColor={colors.mutedForeground}
-              maxLength={NAME_MAX}
+              maxLength={32}
+              autoCapitalize="words"
               style={[
                 styles.input,
                 {
-                  backgroundColor: colors.card,
-                  borderColor: colors.border,
                   color: colors.foreground,
+                  backgroundColor: colors.muted,
+                  borderColor: colors.border,
                 },
               ]}
             />
             <Text style={[styles.hint, { color: colors.mutedForeground }]}>
-              What would you like to call your companion?
+              This name appears in the tooltip and is used by your companion.
             </Text>
           </View>
 
+          {/* Tone */}
           <View style={styles.section}>
             <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
-              Personality
+              Conversation tone
             </Text>
             <View style={styles.toneList}>
-              {TONE_PRESETS.map((preset) => {
-                const selected = preset.id === tone;
+              {TONE_OPTIONS.map((opt) => {
+                const active = opt.value === tone;
                 return (
-                  <TouchableOpacity
-                    key={preset.id}
-                    activeOpacity={0.85}
-                    onPress={() => setTone(preset.id)}
-                    style={[
-                      styles.toneCard,
+                  <Pressable
+                    key={opt.value}
+                    onPress={() => {
+                      if (Platform.OS !== "web")
+                        Haptics.selectionAsync().catch(() => {});
+                      setTone(opt.value);
+                    }}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={`${opt.label}. ${opt.description}`}
+                    style={({ pressed }) => [
+                      styles.toneOption,
                       {
-                        backgroundColor: colors.card,
-                        borderColor: selected ? colors.primary : colors.border,
+                        borderColor: active ? colors.primary : colors.border,
+                        backgroundColor: active ? colors.muted : "transparent",
+                        opacity: pressed ? 0.7 : 1,
                       },
                     ]}
                   >
+                    <Feather
+                      name={opt.icon}
+                      size={18}
+                      color={active ? colors.primary : colors.mutedForeground}
+                      style={styles.toneIcon}
+                    />
                     <View style={styles.toneText}>
                       <Text
                         style={[styles.toneLabel, { color: colors.foreground }]}
                       >
-                        {preset.label}
+                        {opt.label}
                       </Text>
                       <Text
                         style={[
-                          styles.toneBlurb,
+                          styles.toneDesc,
                           { color: colors.mutedForeground },
                         ]}
                       >
-                        {preset.blurb}
+                        {opt.description}
                       </Text>
                     </View>
-                    {selected && (
-                      <Feather name="check" size={20} color={colors.primary} />
+                    {active ? (
+                      <Feather name="check" size={18} color={colors.primary} />
+                    ) : (
+                      <View style={styles.checkPlaceholder} />
                     )}
-                  </TouchableOpacity>
+                  </Pressable>
                 );
               })}
             </View>
           </View>
 
+          {/* Personality note */}
           <View style={styles.section}>
             <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
-              Personal touch
+              About you
             </Text>
             <TextInput
               value={note}
               onChangeText={setNote}
-              placeholder="e.g. Loves space facts and always cheers me on"
+              placeholder="What should your companion know about you?"
               placeholderTextColor={colors.mutedForeground}
-              maxLength={NOTE_MAX}
               multiline
+              numberOfLines={4}
+              maxLength={500}
               style={[
-                styles.input,
-                styles.textArea,
+                styles.textarea,
                 {
-                  backgroundColor: colors.card,
-                  borderColor: colors.border,
                   color: colors.foreground,
+                  backgroundColor: colors.muted,
+                  borderColor: colors.border,
                 },
               ]}
             />
             <Text style={[styles.hint, { color: colors.mutedForeground }]}>
-              Optional — describe quirks or topics your companion should lean
-              into. {note.length}/{NOTE_MAX}
+              {note.length}/500
             </Text>
           </View>
 
-          {error && (
-            <Text style={[styles.error, { color: colors.destructive }]}>
-              {error}
+          {/* Evolution log entry point */}
+          <View style={styles.section}>
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
+              Growth
             </Text>
-          )}
+            <Pressable
+              onPress={() => router.push("/evolution-log")}
+              accessibilityRole="button"
+              accessibilityLabel="Open the evolution log"
+              style={({ pressed }) => [
+                styles.linkRow,
+                {
+                  borderColor: colors.border,
+                  backgroundColor: pressed ? colors.muted : "transparent",
+                },
+              ]}
+            >
+              <Feather
+                name="trending-up"
+                size={18}
+                color={colors.primary}
+                style={styles.linkIcon}
+              />
+              <View style={styles.linkText}>
+                <Text style={[styles.linkLabel, { color: colors.foreground }]}>
+                  Evolution log
+                </Text>
+                <Text style={[styles.linkDesc, { color: colors.mutedForeground }]}>
+                  See how your companion has grown over time.
+                </Text>
+              </View>
+              <Feather
+                name="chevron-right"
+                size={18}
+                color={colors.mutedForeground}
+              />
+            </Pressable>
+          </View>
 
-          <TouchableOpacity
+          {/* Save button */}
+          <Pressable
             onPress={handleSave}
-            activeOpacity={0.85}
-            disabled={!canSave}
-            style={[
+            disabled={saving}
+            accessibilityRole="button"
+            accessibilityLabel="Save companion settings"
+            style={({ pressed }) => [
               styles.saveBtn,
               {
-                backgroundColor: colors.primary,
-                opacity: canSave ? 1 : 0.5,
+                backgroundColor: saved ? colors.primary : colors.primary,
+                opacity: saving ? 0.6 : pressed ? 0.85 : 1,
               },
             ]}
           >
             {saving ? (
               <ActivityIndicator color={colors.primaryForeground} />
             ) : (
-              <Text
-                style={[styles.saveText, { color: colors.primaryForeground }]}
-              >
-                Save changes
+              <Text style={[styles.saveBtnText, { color: colors.primaryForeground }]}>
+                {saved ? "Saved ✓" : "Save"}
               </Text>
             )}
-          </TouchableOpacity>
+          </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
@@ -233,93 +334,133 @@ export default function CompanionSettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-  },
-  flex: {
-    flex: 1,
+  root: { flex: 1 },
+  flex: { flex: 1 },
+  center: {
+    alignItems: "center",
+    justifyContent: "center",
   },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 12,
-    paddingBottom: 12,
+    paddingHorizontal: 16,
+    paddingBottom: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   backBtn: {
-    width: 40,
-    height: 40,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: "center",
     justifyContent: "center",
   },
   headerTitle: {
     fontSize: 17,
-    fontWeight: "700",
+    fontFamily: FONTS.semibold,
+    letterSpacing: -0.3,
   },
   content: {
-    paddingHorizontal: 24,
-    paddingTop: 28,
+    paddingHorizontal: 20,
+    paddingTop: 24,
     gap: 28,
   },
   section: {
     gap: 10,
   },
   sectionLabel: {
-    fontSize: 12,
-    fontWeight: "600",
+    fontSize: 11,
+    fontFamily: FONTS.semibold,
+    letterSpacing: 0.7,
     textTransform: "uppercase",
-    letterSpacing: 0.5,
   },
   input: {
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
     fontSize: 16,
+    fontFamily: FONTS.regular,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1,
   },
-  textArea: {
-    minHeight: 96,
+  textarea: {
+    fontSize: 15,
+    fontFamily: FONTS.regular,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    minHeight: 110,
     textAlignVertical: "top",
   },
   hint: {
-    fontSize: 13,
+    fontSize: 12,
+    fontFamily: FONTS.regular,
+    marginTop: 2,
   },
   toneList: {
-    gap: 10,
+    gap: 8,
   },
-  toneCard: {
+  toneOption: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    borderRadius: 14,
-    borderWidth: 1.5,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  toneIcon: {
+    marginRight: 12,
   },
   toneText: {
     flex: 1,
-    gap: 3,
   },
   toneLabel: {
-    fontSize: 16,
-    fontWeight: "600",
+    fontSize: 15,
+    fontFamily: FONTS.semibold,
+    letterSpacing: -0.2,
   },
-  toneBlurb: {
-    fontSize: 13,
+  toneDesc: {
+    fontSize: 12.5,
+    fontFamily: FONTS.regular,
+    marginTop: 2,
   },
-  error: {
-    fontSize: 14,
-    textAlign: "center",
+  linkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  linkIcon: {
+    marginRight: 12,
+  },
+  linkText: {
+    flex: 1,
+  },
+  linkLabel: {
+    fontSize: 15,
+    fontFamily: FONTS.semibold,
+    letterSpacing: -0.2,
+  },
+  linkDesc: {
+    fontSize: 12.5,
+    fontFamily: FONTS.regular,
+    marginTop: 2,
+  },
+  checkPlaceholder: {
+    width: 18,
+    height: 18,
   },
   saveBtn: {
-    height: 52,
-    borderRadius: 16,
+    borderRadius: 18,
+    paddingVertical: 14,
     alignItems: "center",
     justifyContent: "center",
+    marginTop: 4,
   },
-  saveText: {
+  saveBtnText: {
     fontSize: 16,
-    fontWeight: "700",
+    fontFamily: FONTS.semibold,
   },
 });

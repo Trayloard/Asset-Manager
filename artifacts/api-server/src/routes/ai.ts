@@ -1,9 +1,8 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db, conversations, messages } from "@workspace/db";
+import { db, conversations, messages, companionSettings } from "@workspace/db";
 import { desc, eq } from "drizzle-orm";
 
 import { buildCompanionSystemPrompt } from "../lib/companionPrompt";
-import { getOrCreateCompanionSettings } from "./companion";
 import { DEFAULT_TITLE, getOwnedConversation } from "./conversations";
 
 const router: IRouter = Router();
@@ -47,11 +46,16 @@ router.post("/ai/chat", async (req: Request, res: Response) => {
   });
 
   try {
-    const settings = await getOrCreateCompanionSettings(req.user.id);
+    const [settings] = await db
+      .select()
+      .from(companionSettings)
+      .where(eq(companionSettings.userId, req.user.id))
+      .limit(1);
+
     systemPrompt = buildCompanionSystemPrompt({
-      name: settings.name,
-      tone: settings.tone,
-      personalityNote: settings.personalityNote ?? null,
+      name: settings?.companionName ?? "Empiri",
+      tone: settings?.tone ?? "playful",
+      personalityNote: settings?.personalityNote ?? null,
     });
   } catch (err) {
     req.log.error({ err }, "Failed to load companion settings");

@@ -47,6 +47,266 @@ export const LogoutSuccessValue = {
 } as const;
 export type LogoutSuccess = typeof LogoutSuccessValue;
 
+export interface ErrorEnvelope {
+  error: string;
+}
+
+export interface Conversation {
+  id: number;
+  title: string;
+  createdAt: string;
+  /** @nullable */
+  lastMessageText?: string | null;
+  /** @nullable */
+  lastMessageAt?: string | null;
+}
+
+export interface ConversationInput {
+  title: string;
+}
+
+export interface ConversationUpdate {
+  /**
+     * @minLength 1
+     * @maxLength 80
+     */
+  title: string;
+}
+
+export interface Message {
+  id: number;
+  conversationId: number;
+  role: string;
+  content: string;
+  createdAt: string;
+}
+
+export type PerceptKind = typeof PerceptKind[keyof typeof PerceptKind];
+
+
+export const PerceptKind = {
+  shake: 'shake',
+  charging: 'charging',
+  battery_low: 'battery_low',
+  daypart: 'daypart',
+} as const;
+
+/**
+ * One gentle, privacy-safe moment of device perception (opt-in only).
+ */
+export interface Percept {
+  kind: PerceptKind;
+  /**
+     * How salient the moment felt, 0-1
+     * @minimum 0
+     * @maximum 1
+     */
+  intensity: number;
+  /** When it happened (epoch milliseconds, client clock) */
+  at: number;
+  /**
+     * Optional qualifier, e.g. the daypart bucket ("late_night")
+     * @maxLength 32
+     */
+  detail?: string;
+}
+
+export interface MessageInput {
+  /** @minLength 1 */
+  content: string;
+  /**
+     * Device percepts sensed since the last send (opt-in senses only)
+     * @maxItems 8
+     */
+  percepts?: Percept[];
+}
+
+export interface SendMessageResult {
+  userMessage: Message;
+  assistantMessage: Message;
+}
+
+export interface CheckInInput {
+  /** Approximate hours since the user last interacted */
+  hoursAway: number;
+  /** The companion's current mood label (e.g. sleepy, happy, bright) */
+  mood: string;
+  /** How much the companion has been missing the user, 0-100 */
+  missingYou?: number;
+  /**
+     * Device percepts sensed since the last send (opt-in senses only)
+     * @maxItems 8
+     */
+  percepts?: Percept[];
+}
+
+export interface TranscribeInput {
+  /** Base64-encoded audio data */
+  audio: string;
+  /** Source audio container/extension hint (e.g. m4a, wav, webm) */
+  format?: string;
+}
+
+export interface TranscribeResult {
+  text: string;
+}
+
+export interface SpeechInput {
+  /** @minLength 1 */
+  text: string;
+}
+
+export interface SpeechResult {
+  /** Base64-encoded MP3 audio */
+  audio: string;
+  format: string;
+}
+
+export interface CompanionDrive {
+  key: string;
+  level: number;
+  striving: number;
+}
+
+export interface CompanionTrait {
+  key: string;
+  value: number;
+}
+
+export interface CompanionInterest {
+  /** Normalized, lowercased key — stable for matching/comparison. */
+  topic: string;
+  /** Best original casing for the topic (proper-noun aware), for display. */
+  display: string;
+  affinity: number;
+}
+
+export interface CompanionFact {
+  /** Stable slot identifier (e.g. "dog_name") — a later update to the same slot replaces the text. */
+  key: string;
+  /** The remembered statement, third-person ("Their dog is called Milo"). */
+  text: string;
+  /** How firmly the fact is held right now (0-100); grows on re-mention, fades over time. */
+  salience: number;
+}
+
+export interface CompanionChapter {
+  /** Epoch ms of the earliest moment the chapter covers. */
+  from: number;
+  /** Epoch ms of the latest moment the chapter covers. */
+  to: number;
+  /** The condensed chapter text, second person ("Back then you…"). */
+  text: string;
+  /** Core themes of the period (normalized topic keys). */
+  themes: string[];
+  /** Optional source lines that grounded this chapter. */
+  sourceLines?: string[];
+  /** Optional representative epoch ms for the chapter memory. */
+  memoryDate?: number;
+}
+
+/**
+ * Meaning-based grouping of curiosities, computed server-side — maps a normalized interest topic key to its theme label. Topics absent from the map stand alone. Null when grouping is temporarily unavailable.
+ * @nullable
+ */
+export type CompanionSelfThemes = {[key: string]: string} | null;
+
+export interface CompanionSelf {
+  drives: CompanionDrive[];
+  traits: CompanionTrait[];
+  interests: CompanionInterest[];
+  narrative: string[];
+  /** Durable personal facts the companion remembers about the user, most salient first. */
+  facts: CompanionFact[];
+  /** The condensed life story so far — dated chapters, oldest first. */
+  chapters: CompanionChapter[];
+  interactions: number;
+  ageHours: number;
+  /**
+     * Meaning-based grouping of curiosities, computed server-side — maps a normalized interest topic key to its theme label. Topics absent from the map stand alone. Null when grouping is temporarily unavailable.
+     * @nullable
+     */
+  themes: CompanionSelfThemes;
+}
+
+export interface CompanionSelfSnapshot {
+  capturedAt: string;
+  interactions: number;
+  drives: CompanionDrive[];
+  traits: CompanionTrait[];
+  interests: CompanionInterest[];
+}
+
+export interface CompanionSelfHistory {
+  snapshots: CompanionSelfSnapshot[];
+}
+
+export interface CompanionMemory {
+  /**
+     * The rolling context summary of earlier messages, or null if nothing has been summarised yet.
+     * @nullable
+     */
+  summary: string | null;
+}
+
+export interface UpdateCompanionMemoryInput {
+  /**
+     * The corrected summary text the companion should remember.
+     * @minLength 1
+     * @maxLength 2000
+     */
+  summary: string;
+}
+
+/**
+ * Conversation tone preset.
+ */
+export type CompanionSettingsTone = typeof CompanionSettingsTone[keyof typeof CompanionSettingsTone];
+
+
+export const CompanionSettingsTone = {
+  playful: 'playful',
+  calm: 'calm',
+  witty: 'witty',
+  wise: 'wise',
+  cheerful: 'cheerful',
+} as const;
+
+export interface CompanionSettings {
+  /** The name the user has given their companion. */
+  companionName: string;
+  /** Conversation tone preset. */
+  tone: CompanionSettingsTone;
+  /** A free-text note the user wants the companion to know about them. */
+  personalityNote: string;
+}
+
+export type CompanionSettingsInputTone = typeof CompanionSettingsInputTone[keyof typeof CompanionSettingsInputTone];
+
+
+export const CompanionSettingsInputTone = {
+  playful: 'playful',
+  calm: 'calm',
+  witty: 'witty',
+  wise: 'wise',
+  cheerful: 'cheerful',
+} as const;
+
+export interface CompanionSettingsInput {
+  /**
+     * @minLength 1
+     * @maxLength 32
+     */
+  companionName?: string;
+  tone?: CompanionSettingsInputTone;
+  /** @maxLength 500 */
+  personalityNote?: string;
+}
+
+export interface ApiError {
+  error: string;
+}
+
 export type ConversationMessageRole = typeof ConversationMessageRole[keyof typeof ConversationMessageRole];
 
 
@@ -115,13 +375,6 @@ export const DeleteAccountSuccessValue = {
 } as const;
 export type DeleteAccountSuccess = typeof DeleteAccountSuccessValue;
 
-export interface CompanionSettings {
-  name: string;
-  tone: string;
-  /** @nullable */
-  personalityNote: string | null;
-}
-
 export interface CompanionSettingsEnvelope {
   settings: CompanionSettings;
 }
@@ -141,10 +394,6 @@ export interface UpdateCompanionSettingsRequest {
   personalityNote?: string | null;
 }
 
-export interface ErrorEnvelope {
-  error: string;
-}
-
 /**
  * Opaque session token — `Bearer <sid>`.
  */
@@ -162,4 +411,3 @@ code?: string;
 state?: string;
 iss?: string;
 };
-

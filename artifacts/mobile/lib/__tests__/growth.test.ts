@@ -1,0 +1,328 @@
+import type {
+  CompanionSelf,
+  CompanionSelfSnapshot,
+} from "@workspace/api-client-react";
+
+import {
+  axisDateLabel,
+  buildTimeline,
+  chapterPeriodLabel,
+  firstSeenCuriosities,
+  relativeWhen,
+  sparklinePath,
+  nearestTimelineIndex,
+  timeAxisTicks,
+  timePositions,
+  traitSeries,
+} from "../growth";
+
+const HOUR = 60 * 60 * 1000;
+const NOW = new Date("2026-06-12T12:00:00.000Z").getTime();
+
+function snap(
+  hoursAgo: number,
+  interactions: number,
+  traits: Record<string, number>,
+  interests: { topic: string; affinity: number; display?: string }[],
+): CompanionSelfSnapshot {
+  return {
+    capturedAt: new Date(NOW - hoursAgo * HOUR).toISOString(),
+    interactions,
+    drives: [],
+    traits: Object.entries(traits).map(([key, value]) => ({ key, value })),
+    interests: interests.map((it) => ({ ...it, display: it.display ?? it.topic })),
+  };
+}
+
+function live(
+  interactions: number,
+  traits: Record<string, number>,
+  interests: { topic: string; affinity: number; display?: string }[],
+): CompanionSelf {
+  return {
+    interactions,
+    ageHours: 10,
+    narrative: [],
+    drives: [],
+    traits: Object.entries(traits).map(([key, value]) => ({ key, value })),
+    interests: interests.map((it) => ({ ...it, display: it.display ?? it.topic })),
+    facts: [],
+    chapters: [],
+    themes: null,
+  };
+}
+
+describe("chapterPeriodLabel", () => {
+  it("labels a single-month period as month + year", () => {
+    const from = new Date(2026, 6, 3).getTime();
+    const to = new Date(2026, 6, 24).getTime();
+    expect(chapterPeriodLabel(from, to)).toBe("Jul 2026");
+  });
+
+  it("labels a same-year span with both months", () => {
+    const from = new Date(2026, 6, 3).getTime();
+    const to = new Date(2026, 8, 15).getTime();
+    expect(chapterPeriodLabel(from, to)).toBe("Jul – Sep 2026");
+  });
+
+  it("labels a cross-year span with both years", () => {
+    const from = new Date(2026, 11, 20).getTime();
+    const to = new Date(2027, 0, 9).getTime();
+    expect(chapterPeriodLabel(from, to)).toBe("Dec 2026 – Jan 2027");
+  });
+
+  it("tolerates swapped bounds", () => {
+    const from = new Date(2026, 6, 24).getTime();
+    const to = new Date(2026, 6, 3).getTime();
+    expect(chapterPeriodLabel(from, to)).toBe("Jul 2026");
+  });
+});
+
+describe("buildTimeline", () => {
+  it("sorts snapshots oldest→newest and appends the live now point", () => {
+    const points = buildTimeline(
+      [
+        snap(2, 8, { warmth: 60 }, []),
+        snap(6, 2, { warmth: 50 }, []),
+      ],
+      live(12, { warmth: 70 }, []),
+      NOW,
+    );
+    expect(points).toHaveLength(3);
+    expect(points.map((p) => p.interactions)).toEqual([2, 8, 12]);
+    expect(points[0].isNow).toBe(false);
+    expect(points[2].isNow).toBe(true);
+    expect(points[2].at).toBe(NOW);
+  });
+
+  it("works with no snapshots (just the now point)", () => {
+    const points = buildTimeline([], live(3, { calm: 40 }, []), NOW);
+    expect(points).toHaveLength(1);
+    expect(points[0].isNow).toBe(true);
+  });
+
+  it("omits the now point when there is no live self", () => {
+    const points = buildTimeline([snap(1, 5, { calm: 40 }, [])], null, NOW);
+    expect(points).toHaveLength(1);
+    expect(points[0].isNow).toBe(false);
+  });
+});
+
+describe("traitSeries", () => {
+  it("extracts one value per point and defaults missing traits to 0", () => {
+    const points = buildTimeline(
+      [snap(2, 8, { warmth: 60 }, [])],
+      live(12, { warmth: 70, calm: 30 }, []),
+      NOW,
+    );
+    const series = traitSeries(points, ["warmth", "calm"]);
+    expect(series.find((s) => s.key === "warmth")!.values).toEqual([60, 70]);
+    // calm missing from the first snapshot → 0, present live → 30
+    expect(series.find((s) => s.key === "calm")!.values).toEqual([0, 30]);
+  });
+});
+
+describe("firstSeenCuriosities", () => {
+  it("keeps the earliest appearance and the latest affinity, newest first", () => {
+    const points = buildTimeline(
+      [
+        snap(6, 2, {}, [{ topic: "astronomy", affinity: 20 }]),
+        snap(2, 8, {}, [
+          { topic: "astronomy", affinity: 35 },
+          { topic: "jazz", affinity: 25 },
+        ]),
+      ],
+      live(12, {}, [
+        { topic: "astronomy", affinity: 40 },
+        { topic: "jazz", affinity: 30 },
+        { topic: "deep sea", affinity: 15 },
+      ]),
+      NOW,
+    );
+    const curios = firstSeenCuriosities(points);
+    // newest first-seen on top: deep sea (now) > jazz (2h) > astronomy (6h)
+    expect(curios.map((c) => c.topic)).toEqual(["deep sea", "jazz", "astronomy"]);
+
+    const astronomy = curios.find((c) => c.topic === "astronomy")!;
+    expect(astronomy.at).toBe(NOW - 6 * HOUR); // earliest sighting
+    expect(astronomy.affinity).toBe(40); // latest affinity
+    expect(astronomy.isNow).toBe(false);
+
+    const deepSea = curios.find((c) => c.topic === "deep sea")!;
+    expect(deepSea.isNow).toBe(true);
+  });
+
+  it("returns an empty list when nothing has surfaced", () => {
+    expect(firstSeenCuriosities([])).toEqual([]);
+  });
+});
+
+describe("sparklinePath", () => {
+  it("returns empty string for no values", () => {
+    expect(sparklinePath([], 100, 40)).toBe("");
+  });
+
+  it("draws a flat line for a single value", () => {
+    expect(sparklinePath([50], 100, 40)).toMatch(/^M 0 .+ L 100 /);
+  });
+
+  it("draws one move + (n-1) line segments for n values", () => {
+    const d = sparklinePath([0, 50, 100], 100, 40);
+    expect((d.match(/L /g) || []).length).toBe(2);
+    expect(d.startsWith("M ")).toBe(true);
+  });
+
+  it("spaces points by real time positions when xs is supplied", () => {
+    // xs places the middle point at 25% of the width, not the even-spacing 50%.
+    const d = sparklinePath([0, 50, 100], 100, 40, { xs: [0, 0.25, 1] });
+    expect(d).toContain("L 25.00 ");
+    expect(d).toContain("L 100.00 ");
+    expect(d).not.toContain("L 50.00 ");
+  });
+
+  it("falls back to even spacing when xs length doesn't match", () => {
+    const d = sparklinePath([0, 50, 100], 100, 40, { xs: [0, 1] });
+    expect(d).toContain("L 50.00 "); // even-spaced middle point
+  });
+});
+
+describe("timePositions", () => {
+  it("returns [] / [0] for empty and single inputs", () => {
+    expect(timePositions([])).toEqual([]);
+    expect(timePositions([{ at: NOW }])).toEqual([0]);
+  });
+
+  it("normalizes real gaps so uneven spacing is preserved", () => {
+    // points at 6h ago, 2h ago, now → spans 6h; middle sits at 4/6 = ~0.667
+    const pos = timePositions([
+      { at: NOW - 6 * HOUR },
+      { at: NOW - 2 * HOUR },
+      { at: NOW },
+    ]);
+    expect(pos[0]).toBe(0);
+    expect(pos[2]).toBe(1);
+    expect(pos[1]).toBeCloseTo(2 / 3, 5);
+    expect(pos[1]).not.toBeCloseTo(0.5, 5); // not even index spacing
+  });
+
+  it("falls back to even spacing when all timestamps are identical", () => {
+    const pos = timePositions([{ at: NOW }, { at: NOW }, { at: NOW }]);
+    expect(pos).toEqual([0, 0.5, 1]);
+  });
+});
+
+describe("axisDateLabel", () => {
+  it("labels the current day as today", () => {
+    expect(axisDateLabel(NOW, NOW)).toBe("today");
+  });
+
+  it("renders a compact calendar date for other days", () => {
+    const label = axisDateLabel(NOW - 5 * 24 * HOUR, NOW);
+    expect(label).not.toBe("today");
+    expect(label).toMatch(/^[A-Z][a-z]{2} \d{1,2}$/);
+  });
+
+  it("includes the year when the date falls in a different year than now", () => {
+    const label = axisDateLabel(NOW - 400 * 24 * HOUR, NOW);
+    expect(label).toMatch(/^[A-Z][a-z]{2} \d{1,2}, \d{4}$/);
+    const d = new Date(NOW - 400 * 24 * HOUR);
+    expect(label.endsWith(`, ${d.getFullYear()}`)).toBe(true);
+  });
+
+  it("keeps the compact form for dates within the current year", () => {
+    const sameYear = new Date(NOW);
+    sameYear.setDate(sameYear.getDate() - 5);
+    const label = axisDateLabel(sameYear.getTime(), NOW);
+    expect(label).toMatch(/^[A-Z][a-z]{2} \d{1,2}$/);
+  });
+});
+
+describe("timeAxisTicks", () => {
+  it("is empty until there are two points to span", () => {
+    expect(timeAxisTicks([])).toEqual([]);
+    expect(timeAxisTicks([{ at: NOW, isNow: true }])).toEqual([]);
+  });
+
+  it("labels the oldest point and the live present at the endpoints", () => {
+    const points = buildTimeline(
+      [snap(6, 2, { warmth: 50 }, []), snap(2, 8, { warmth: 60 }, [])],
+      live(12, { warmth: 70 }, []),
+      NOW,
+    );
+    const ticks = timeAxisTicks(points, NOW);
+    expect(ticks).toHaveLength(2);
+    expect(ticks[0].pos).toBe(0);
+    expect(ticks[1].pos).toBe(1);
+    expect(ticks[0].label).toBe(axisDateLabel(NOW - 6 * HOUR, NOW));
+    expect(ticks[1].label).toBe("now");
+  });
+
+  it("labels the right endpoint with a date when there is no live point", () => {
+    const points = buildTimeline(
+      [snap(48, 2, { warmth: 50 }, []), snap(24, 8, { warmth: 60 }, [])],
+      null,
+      NOW,
+    );
+    const ticks = timeAxisTicks(points, NOW);
+    expect(ticks[1].label).not.toBe("now");
+    expect(ticks[1].label).toBe(axisDateLabel(NOW - 24 * HOUR, NOW));
+  });
+});
+
+describe("nearestTimelineIndex", () => {
+  it("returns -1 for empty positions", () => {
+    expect(nearestTimelineIndex(0.5, [])).toBe(-1);
+  });
+
+  it("returns 0 for a single point regardless of x", () => {
+    expect(nearestTimelineIndex(0, [0])).toBe(0);
+    expect(nearestTimelineIndex(1, [0])).toBe(0);
+  });
+
+  it("returns the index of the closest position", () => {
+    const xs = [0, 0.5, 1];
+    expect(nearestTimelineIndex(0, xs)).toBe(0);
+    expect(nearestTimelineIndex(0.2, xs)).toBe(0);
+    expect(nearestTimelineIndex(0.26, xs)).toBe(1);
+    expect(nearestTimelineIndex(0.5, xs)).toBe(1);
+    expect(nearestTimelineIndex(0.9, xs)).toBe(2);
+    expect(nearestTimelineIndex(1, xs)).toBe(2);
+  });
+
+  it("clamps x values outside 0..1 to the endpoints", () => {
+    const xs = [0, 0.5, 1];
+    expect(nearestTimelineIndex(-0.5, xs)).toBe(0);
+    expect(nearestTimelineIndex(2, xs)).toBe(2);
+  });
+
+  it("on a tie prefers the later (more recent) point", () => {
+    // x=0.5 is equidistant from positions 0 and 1
+    const xs = [0, 1];
+    expect(nearestTimelineIndex(0.5, xs)).toBe(1);
+  });
+
+  it("handles unevenly spaced time positions", () => {
+    // Sparse early, dense recent
+    const xs = [0, 0.05, 0.1, 0.9, 1];
+    // 0.07 is closer to 0.05 (dist 0.02) than to 0.1 (dist 0.03) → index 1
+    expect(nearestTimelineIndex(0.07, xs)).toBe(1);
+    // 0.5 is closer to 0.9 (dist 0.4) than to 0.1 (dist 0.4) — tie → later
+    expect(nearestTimelineIndex(0.5, xs)).toBe(3);
+    // 0.93 is closer to 0.9 (dist 0.03) than to 1.0 (dist 0.07)
+    expect(nearestTimelineIndex(0.93, xs)).toBe(3);
+    // 0.97 is closer to 1.0 (dist 0.03) than to 0.9 (dist 0.07)
+    expect(nearestTimelineIndex(0.97, xs)).toBe(4);
+  });
+});
+
+describe("relativeWhen", () => {
+  it("labels the live point as just now", () => {
+    expect(relativeWhen(NOW - 5 * HOUR, true, NOW)).toBe("just now");
+  });
+  it("buckets hours, days and weeks", () => {
+    expect(relativeWhen(NOW - 3 * HOUR, false, NOW)).toBe("3 hours ago");
+    expect(relativeWhen(NOW - 25 * HOUR, false, NOW)).toBe("yesterday");
+    expect(relativeWhen(NOW - 3 * 24 * HOUR, false, NOW)).toBe("3 days ago");
+    expect(relativeWhen(NOW - 14 * 24 * HOUR, false, NOW)).toBe("2 weeks ago");
+  });
+});

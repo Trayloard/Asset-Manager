@@ -1,405 +1,1004 @@
-import React, { useRef, useState } from "react";
+import { Feather } from "@expo/vector-icons";
+import type { Message } from "@workspace/api-client-react";
+import { BlurView } from "expo-blur";
+import { useRouter } from "expo-router";
+import * as Haptics from "expo-haptics";
+import { StatusBar } from "expo-status-bar";
+import React, { useEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   FlatList,
-  Image,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
   StyleSheet,
   Text,
-  TouchableOpacity,
+  TextInput,
   View,
+  useColorScheme,
+  useWindowDimensions,
 } from "react-native";
-import { Feather } from "@expo/vector-icons";
-import * as Haptics from "expo-haptics";
-import { useRouter } from "expo-router";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ChatInput } from "@/components/ChatInput";
-import { Creature } from "@/components/Creature";
-import { DynamicIsland } from "@/components/DynamicIsland";
-import { MessageBubble } from "@/components/MessageBubble";
-import { useCompanion, Message } from "@/context/CompanionContext";
-import { useColors } from "@/hooks/useColors";
-import { useAuth } from "@/lib/auth";
 
-export default function HomeScreen() {
+import { AmbientGlow } from "@/components/AmbientGlow";
+import { ChatInput } from "@/components/ChatInput";
+import { ChatSwitcherSheet } from "@/components/ChatSwitcherSheet";
+import { CheckInSettingsSheet } from "@/components/CheckInSettingsSheet";
+import { CompanionOrb } from "@/components/CompanionOrb";
+import { InnerSelfSheet } from "@/components/InnerSelfSheet";
+import { MessageBubble, RetryBubble, TypingBubble } from "@/components/MessageBubble";
+import { FONTS } from "@/constants/fonts";
+import { useCompanion } from "@/contexts/CompanionContext";
+import { useSmoothedWarmth } from "@/hooks/useAccentColor";
+import { useColors } from "@/hooks/useColors";
+import { useCompanionTraits } from "@/hooks/useCompanionTraits";
+import { accentForWarmth } from "@/lib/accent";
+import { useAuth } from "@/lib/auth";
+import type { MoodLabel } from "@/lib/mood";
+
+const ORB_SIZE = 76;
+const ORB_R = ORB_SIZE / 2;
+
+function moodLabel(mood: MoodLabel): string {
+  switch (mood) {
+    case "bright":   return "Feeling bright ✨";
+    case "happy":    return "Happy you're here";
+    case "content":  return "Here for you";
+    case "low":      return "Missing you a little";
+    case "sleepy":   return "A bit sleepy…";
+    case "sad":      return "Having a rough moment…";
+  }
+}
+
+function statusLabel(
+  status: ReturnType<typeof useCompanion>["status"],
+  mood: MoodLabel,
+): string {
+  switch (status) {
+    case "listening":   return "Listening…";
+    case "transcribing": return "Got it…";
+    case "thinking":    return "Thinking…";
+    case "speaking":    return "Speaking…";
+    default:            return moodLabel(mood);
+  }
+}
+
+interface NavButtonProps {
+  icon: keyof typeof Feather.glyphMap;
+  label: string;
+  active?: boolean;
+  activeColor: string;
+  onPress: () => void;
+}
+
+function NavButton({ icon, label, active, activeColor, onPress }: NavButtonProps) {
+  const colors = useColors();
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.navBtn, { opacity: pressed ? 0.65 : active ? 1 : 0.52 }]}
+    >
+      <View
+        style={[
+          styles.navBtnIcon,
+          {
+            backgroundColor: active ? `${activeColor}22` : colors.glass,
+            borderColor: active ? `${activeColor}55` : colors.glassBorder,
+          },
+        ]}
+      >
+        <BlurView
+          intensity={18}
+          tint={colors.blurTint}
+          style={StyleSheet.absoluteFill}
+        />
+        <Feather
+          name={icon}
+          size={19}
+          color={active ? activeColor : colors.mutedForeground}
+        />
+      </View>
+      <Text style={[styles.navBtnLabel, { color: active ? activeColor : colors.mutedForeground }]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+export default function CompanionScreen() {
+  const colors = useColors();
+  const scheme = useColorScheme();
+  const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
+
   const {
     messages,
-    conversations,
-    activeConversationId,
-    creatureState,
-    companionName,
-    isStreaming,
-    sendMessage,
-    switchConversation,
-    newConversation,
-    deleteActiveConversation,
+    status,
+    voiceEnabled,
+    notificationsEnabled,
+    checkInCadence,
+    mood,
+    conversationId,
+    conversationTitle,
+    chats,
+    refreshChats,
+    openConversation,
+    startNewChat,
+    renameConversation,
+    deleteConversation,
+    initializing,
+    initError,
+    error,
+    failedTurn,
+    isRecording,
+    isCallActive,
+    micVolumeRef,
+    settings,
+    sendText,
+    retryMessage,
+    startListening,
+    stopListening,
+    startCall,
+    endCall,
+    toggleVoice,
+    toggleNotifications,
+    setCheckInCadence,
+    quietHours,
+    setQuietHours,
+    sensesEnabled,
+    toggleSenses,
+    pendingReflection,
+    dismissReflection,
+    retryInit,
+    dismissError,
+    devTriggerCheckIn,
+    devScheduleNudgeSoon,
+    devRegressSelf,
+    signOut,
   } = useCompanion();
-  const colors = useColors();
-  const insets = useSafeAreaInsets();
-  const { user, logout } = useAuth();
+
+  const { isAuthenticated, isLoading: authLoading, login } = useAuth();
+
+  const traits = useCompanionTraits(conversationId);
+  // One shared warmth tween feeds every personality-tinted surface, so the
+  // chrome accent, primary buttons, and send/mic gradient all drift together.
+  const smoothWarmth = useSmoothedWarmth(traits.warmthShift);
+  const accent = accentForWarmth(smoothWarmth, colors.statusAccent, colors.spectrum);
+  // Primary CTAs blend from the brand button color (not statusAccent), so a
+  // neutral personality keeps today's exact button color and CTAs stay bold.
+  const primaryAccent = accentForWarmth(smoothWarmth, colors.primary, colors.spectrum);
+  const [peekVisible, setPeekVisible] = useState(false);
+  const [settingsVisible, setSettingsVisible] = useState(false);
+  const [switcherVisible, setSwitcherVisible] = useState(false);
+
+  const openSwitcher = () => {
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSwitcherVisible(true);
+  };
+
+  // Rename-chat modal state
+  const [renameVisible, setRenameVisible] = useState(false);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renameSaving, setRenameSaving] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
+
+  const openRename = () => {
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setRenameDraft(conversationTitle);
+    setRenameError(null);
+    setRenameVisible(true);
+  };
+
+  const submitRename = async () => {
+    const next = renameDraft.trim();
+    if (!next) {
+      setRenameError("Please enter a name.");
+      return;
+    }
+    if (next === conversationTitle) {
+      setRenameVisible(false);
+      return;
+    }
+    setRenameSaving(true);
+    setRenameError(null);
+    try {
+      await renameConversation(next);
+      setRenameVisible(false);
+    } catch {
+      setRenameError("Couldn't rename the chat. Try again.");
+    } finally {
+      setRenameSaving(false);
+    }
+  };
+
+  const topPad   = Platform.OS === "web" ? 24 : insets.top + 8;
+  const bottomPad = Platform.OS === "web" ? 20 : insets.bottom + 6;
+
+  // Floating orb position — default bottom-right, above the nav row.
+  const orbX = useSharedValue(width - ORB_R - 22);
+  const orbY = useSharedValue(height * 0.55);
+
+  // Update default x when width changes (orientation).
+  useEffect(() => {
+    orbX.value = width - ORB_R - 22;
+  }, [width, orbX]);
+
+  // Drag gesture — runs on the UI thread.
+  const [isDragging, setIsDragging] = useState(false);
+  const pan = Gesture.Pan()
+    .onBegin(() => {
+      "worklet";
+    })
+    .onChange((e) => {
+      "worklet";
+      orbX.value = Math.max(ORB_R + 4, Math.min(width - ORB_R - 4, orbX.value + e.changeX));
+      orbY.value = Math.max(topPad + ORB_R + 4, Math.min(height - 200, orbY.value + e.changeY));
+    });
+
+  // Bloom-in on mount — orb scales up from nothing.
+  const reduceMotion = useReducedMotion();
+  const bloom = useSharedValue(reduceMotion ? 1 : 0);
+  useEffect(() => {
+    if (reduceMotion) { bloom.value = 1; return; }
+    bloom.value = withTiming(1, { duration: 1100, easing: Easing.out(Easing.cubic) });
+  }, [bloom, reduceMotion]);
+
+  const orbAnimStyle = useAnimatedStyle(() => ({
+    position: "absolute",
+    left: orbX.value - ORB_R,
+    top:  orbY.value - ORB_R,
+    opacity: bloom.value,
+    transform: [{ scale: 0.6 + bloom.value * 0.4 }],
+  }));
+
+  const reversed = useMemo(() => [...messages].reverse(), [messages]);
+  const busy = status === "thinking" || status === "transcribing" || status === "speaking";
+
+  const handleMic = () => {
+    // In call mode the loop manages recording; tapping the mic does nothing.
+    if (isCallActive) return;
+    if (isRecording) stopListening(); else startListening();
+  };
+
+  const handleMicLongPress = () => {
+    startCall().catch(() => {});
+  };
+  const handleRetry = () => {
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    retryMessage();
+  };
+  const handleToggleVoice = () => {
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    toggleVoice();
+  };
+  const handleToggleNotifications = () => {
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    toggleNotifications();
+  };
+  const handleOpenPeek = () => {
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setPeekVisible(true);
+  };
   const router = useRouter();
-  const listRef = useRef<FlatList<Message>>(null);
-  const [switcherOpen, setSwitcherOpen] = useState(false);
 
-  const firstName = user?.firstName?.trim() || null;
-  const initial = (firstName || user?.email || "?").charAt(0).toUpperCase();
-
-  const handleSend = (text: string) => {
-    sendMessage(text);
-    setTimeout(() => {
-      listRef.current?.scrollToEnd({ animated: true });
-    }, 100);
+  const handleOpenSettings = () => {
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSettingsVisible(true);
   };
 
-  const handleClear = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    deleteActiveConversation();
+  const handlePersonalize = () => {
+    setSettingsVisible(false);
+    router.push("/companion-settings");
   };
 
-  const handleNewChat = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setSwitcherOpen(false);
-    newConversation();
+  const handleSignOut = () => {
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Alert.alert(
+      "Sign out?",
+      "You'll need to sign in again to continue your conversation.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Sign Out",
+          style: "destructive",
+          onPress: () => {
+            setSettingsVisible(false);
+            signOut();
+          },
+        },
+      ],
+    );
   };
 
-  const handleSwitch = (id: number) => {
-    Haptics.selectionAsync();
-    setSwitcherOpen(false);
-    switchConversation(id);
+  const handleDevCheckIn = () => {
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSettingsVisible(false);
+    devTriggerCheckIn();
+  };
+  const handleDevNudge = () => {
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    devScheduleNudgeSoon();
+  };
+  const handleDevRegress = () => {
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    devRegressSelf();
   };
 
-  const renderEmpty = () => (
-    <View style={styles.emptyContainer}>
-      <Creature state={creatureState} size={200} />
-      <Text style={[styles.emptyTitle, { color: colors.foreground }]}>
-        Say hello to Empiri
-      </Text>
-      <Text style={[styles.emptySubtitle, { color: colors.mutedForeground }]}>
-        Your AI companion lives in the Dynamic Island above.{"\n"}Tap it to start a conversation.
-      </Text>
-    </View>
-  );
+  if (authLoading) {
+    return (
+      <View style={[styles.root, styles.center, { backgroundColor: colors.background }]}>
+        <ActivityIndicator color={colors.primary} />
+      </View>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <View style={[styles.root, styles.center, { backgroundColor: colors.background }]}>
+        <StatusBar style={scheme === "dark" ? "light" : "dark"} />
+        <Text style={[styles.emptyTitle, { color: colors.foreground, marginBottom: 8 }]}>
+          Welcome to Empiri
+        </Text>
+        <Text style={[styles.emptyText, { color: colors.mutedForeground, marginBottom: 32 }]}>
+          Sign in to start your conversation.
+        </Text>
+        <Pressable onPress={login} style={[styles.retry, { backgroundColor: primaryAccent }]}>
+          <Text style={[styles.retryText, { color: colors.primaryForeground }]}>Sign in</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  const orbStatusText = statusLabel(status, mood.label);
+  const companionName = settings?.companionName?.trim() || "Empiri";
+  const toneBadge = settings?.tone
+    ? settings.tone.charAt(0).toUpperCase() + settings.tone.slice(1)
+    : null;
 
   return (
-    <View style={[styles.screen, { backgroundColor: colors.background }]}>
-      <DynamicIsland state={creatureState} companionName={companionName} />
+    <View style={[styles.root, { backgroundColor: colors.background }]}>
+      <StatusBar style={scheme === "dark" ? "light" : "dark"} />
+      <AmbientGlow status={status} traits={traits} />
 
-      <View style={[styles.headerRow, { borderBottomColor: colors.border }]}>
-        <TouchableOpacity
-          style={styles.userInfo}
-          onPress={() => router.push("/profile")}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel="Open profile"
-        >
-          {user?.profileImageUrl ? (
-            <Image
-              source={{ uri: user.profileImageUrl }}
-              style={[styles.avatar, { backgroundColor: colors.muted }]}
-            />
-          ) : (
-            <View style={[styles.avatar, styles.avatarFallback, { backgroundColor: colors.muted }]}>
-              <Text style={[styles.avatarInitial, { color: colors.mutedForeground }]}>
-                {initial}
+      <KeyboardAvoidingView style={styles.flex} behavior="padding" keyboardVerticalOffset={0}>
+        {/* Chat — full height, top padding leaves room for status bar */}
+        <View style={[styles.flex, { paddingTop: topPad + 4 }]}>
+          {/* Chat header — chats button opens the conversation switcher,
+              companion name + tone badge open Personalize, and the pencil
+              renames the current conversation */}
+          {!initializing && !initError && conversationId != null ? (
+            <View style={styles.headerRow}>
+              <Pressable
+                onPress={openSwitcher}
+                accessibilityRole="button"
+                accessibilityLabel="Switch chats"
+                testID="chat-switcher-button"
+                hitSlop={8}
+                style={({ pressed }) => [
+                  styles.switcherBtn,
+                  {
+                    backgroundColor: colors.glass,
+                    borderColor: colors.glassBorder,
+                    opacity: pressed ? 0.6 : 1,
+                  },
+                ]}
+              >
+                <Feather name="message-square" size={15} color={colors.mutedForeground} />
+              </Pressable>
+              <Pressable
+                onPress={handlePersonalize}
+                accessibilityRole="button"
+                accessibilityLabel={`Personalize ${companionName}`}
+                testID="companion-header"
+                style={({ pressed }) => [
+                  styles.titlePressable,
+                  { opacity: pressed ? 0.6 : 1 },
+                ]}
+              >
+                <Text
+                  style={[styles.titleText, { color: colors.foreground }]}
+                  numberOfLines={1}
+                >
+                  {companionName}
+                </Text>
+                {toneBadge ? (
+                  <View
+                    style={[
+                      styles.toneBadge,
+                      { backgroundColor: `${accent}1E`, borderColor: `${accent}55` },
+                    ]}
+                    testID="tone-badge"
+                  >
+                    <Text style={[styles.toneBadgeText, { color: accent }]}>
+                      {toneBadge}
+                    </Text>
+                  </View>
+                ) : null}
+              </Pressable>
+              <Pressable
+                onPress={openRename}
+                accessibilityRole="button"
+                accessibilityLabel="Rename this chat"
+                testID="chat-title"
+                hitSlop={10}
+                style={({ pressed }) => [
+                  styles.renameIconBtn,
+                  { opacity: pressed ? 0.6 : 1 },
+                ]}
+              >
+                <Feather name="edit-2" size={13} color={colors.mutedForeground} />
+              </Pressable>
+              {/* Spacer mirrors the switcher button so the title stays centred */}
+              <View style={styles.switcherBtnSpacer} />
+            </View>
+          ) : null}
+          {initializing ? (
+            <View style={styles.center}>
+              <ActivityIndicator color={colors.primary} />
+            </View>
+          ) : initError ? (
+            <View style={styles.center}>
+              <Feather name="cloud-off" size={36} color={colors.mutedForeground} />
+              <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>{initError}</Text>
+              <Pressable onPress={retryInit} style={[styles.retry, { backgroundColor: primaryAccent }]}>
+                <Text style={[styles.retryText, { color: colors.primaryForeground }]}>Retry</Text>
+              </Pressable>
+            </View>
+          ) : messages.length === 0 ? (
+            <View style={styles.center}>
+              <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Say hi to Empiri</Text>
+              <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
+                Type a message or tap the mic to talk. I'm always here for a chat.
               </Text>
             </View>
-          )}
-          <Text style={[styles.userName, { color: colors.foreground }]} numberOfLines={1}>
-            {firstName ? `Hi, ${firstName}` : "Welcome"}
-          </Text>
-        </TouchableOpacity>
-        <View style={styles.headerActions}>
-          <TouchableOpacity
-            onPress={() => setSwitcherOpen(true)}
-            style={styles.iconBtn}
-            disabled={isStreaming}
-            accessibilityRole="button"
-            accessibilityLabel="Switch conversation"
-          >
-            <Feather
-              name="message-square"
-              size={16}
-              color={isStreaming ? colors.border : colors.mutedForeground}
+          ) : (
+            <>
+              {/* "While you were away" reflection card — shown when Empiri
+                  composed a thought during the user's absence. Dismissible;
+                  dismissal is persisted so the card stays gone after a restart. */}
+              {pendingReflection ? (
+                <View
+                  style={[
+                    styles.reflectionCard,
+                    {
+                      backgroundColor: `${accent}14`,
+                      borderColor: `${accent}30`,
+                    },
+                  ]}
+                >
+                  <View style={styles.reflectionHeader}>
+                    <Feather name="moon" size={12} color={accent} />
+                    <Text style={[styles.reflectionLabel, { color: accent }]}>
+                      While you were away
+                    </Text>
+                    <Pressable
+                      onPress={() => { dismissReflection().catch(() => {}); }}
+                      hitSlop={10}
+                      accessibilityLabel="Dismiss reflection"
+                      accessibilityRole="button"
+                    >
+                      <Feather name="x" size={14} color={accent} style={{ opacity: 0.7 }} />
+                    </Pressable>
+                  </View>
+                  <Text style={[styles.reflectionText, { color: colors.foreground }]}>
+                    {pendingReflection.thought}
+                  </Text>
+                </View>
+              ) : null}
+            <FlatList
+              data={reversed}
+              inverted
+              keyExtractor={(item: Message) => String(item.id)}
+              renderItem={({ item }) => (
+                <MessageBubble role={item.role} content={item.content} warmth={smoothWarmth} accent={accent} />
+              )}
+              ListHeaderComponent={
+                status === "thinking" || status === "transcribing" ? (
+                  <TypingBubble />
+                ) : failedTurn ? (
+                  <RetryBubble onRetry={handleRetry} accent={accent} />
+                ) : null
+              }
+              contentContainerStyle={styles.listContent}
+              keyboardDismissMode="interactive"
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
             />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={handleNewChat}
-            style={styles.iconBtn}
-            disabled={isStreaming}
-            accessibilityRole="button"
-            accessibilityLabel="New chat"
-          >
-            <Feather
-              name="edit-3"
-              size={16}
-              color={isStreaming ? colors.border : colors.mutedForeground}
-            />
-          </TouchableOpacity>
-          {messages.length > 0 && (
-            <TouchableOpacity
-              onPress={handleClear}
-              style={styles.iconBtn}
-              disabled={isStreaming}
-              accessibilityRole="button"
-              accessibilityLabel="Delete this chat"
-            >
-              <Feather
-                name="trash-2"
-                size={16}
-                color={isStreaming ? colors.border : colors.mutedForeground}
-              />
-            </TouchableOpacity>
+            </>
           )}
-          <TouchableOpacity onPress={logout} style={styles.iconBtn}>
-            <Feather name="log-out" size={16} color={colors.mutedForeground} />
-          </TouchableOpacity>
         </View>
-      </View>
 
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={0}
-      >
-        <FlatList
-          ref={listRef}
-          data={messages}
-          keyExtractor={(m) => m.id}
-          renderItem={({ item }) => (
-            <MessageBubble message={item} companionName={companionName} />
-          )}
-          ListEmptyComponent={renderEmpty}
-          contentContainerStyle={[
-            styles.list,
-            messages.length === 0 && styles.listEmpty,
-          ]}
-          onContentSizeChange={() =>
-            listRef.current?.scrollToEnd({ animated: true })
-          }
-          showsVerticalScrollIndicator={false}
-        />
-        <ChatInput onSend={handleSend} disabled={isStreaming} />
+        {/* Transient error banner */}
+        {error ? (
+          <Pressable
+            onPress={dismissError}
+            style={[styles.errorBanner, { backgroundColor: colors.destructive }]}
+          >
+            <Feather name="alert-circle" size={15} color="#fff" />
+            <Text style={styles.errorText}>{error}</Text>
+            <Feather name="x" size={15} color="#fff" />
+          </Pressable>
+        ) : null}
+
+        {/* Input + bottom nav */}
+        <View style={{ paddingBottom: bottomPad }}>
+          {/* In-call bar — shown above input during an audio-call loop */}
+          {isCallActive ? (
+            <View style={styles.callBar}>
+              <View style={styles.callStatusRow}>
+                <Feather name="mic" size={14} color={accent} />
+                <Text style={[styles.callStatusText, { color: accent }]}>
+                  {status === "listening"
+                    ? "Listening…"
+                    : status === "transcribing"
+                      ? "Transcribing…"
+                      : status === "thinking"
+                        ? "Thinking…"
+                        : status === "speaking"
+                          ? "Speaking…"
+                          : "In call"}
+                </Text>
+              </View>
+              <Pressable
+                onPress={endCall}
+                accessibilityRole="button"
+                accessibilityLabel="End call"
+                testID="end-call-button"
+                style={({ pressed }) => [
+                  styles.endCallBtn,
+                  { backgroundColor: colors.destructive, opacity: pressed ? 0.75 : 1 },
+                ]}
+              >
+                <Feather name="phone-off" size={13} color="#fff" />
+                <Text style={styles.endCallText}>End call</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          <ChatInput
+            onSend={sendText}
+            onMicPress={handleMic}
+            onMicLongPress={handleMicLongPress}
+            isRecording={isRecording}
+            isCallActive={isCallActive}
+            busy={busy}
+            warmth={smoothWarmth}
+            micVolumeRef={micVolumeRef}
+          />
+          {/* Nav row — replaces scattered corner buttons */}
+          <View style={styles.navRow}>
+            <NavButton
+              icon={notificationsEnabled ? "bell" : "bell-off"}
+              label="Benachrichtigung"
+              active={notificationsEnabled}
+              activeColor={accent}
+              onPress={handleToggleNotifications}
+            />
+            <NavButton
+              icon={voiceEnabled ? "volume-2" : "volume-x"}
+              label="Stimme"
+              active={voiceEnabled}
+              activeColor={accent}
+              onPress={handleToggleVoice}
+            />
+            <NavButton
+              icon="settings"
+              label="Einstellungen"
+              active={false}
+              activeColor={accent}
+              onPress={handleOpenSettings}
+            />
+          </View>
+        </View>
       </KeyboardAvoidingView>
 
+      {/* Floating draggable orb — outside KAV so keyboard doesn't shift it */}
+      <GestureDetector gesture={pan}>
+        <Animated.View style={orbAnimStyle} pointerEvents="box-none">
+          {/* Tooltip pill — name + mood status */}
+          <View
+            style={[
+              styles.tooltip,
+              {
+                borderColor: `${accent}44`,
+                right: ORB_SIZE + 10,
+              },
+            ]}
+            pointerEvents="none"
+          >
+            <BlurView intensity={28} tint={colors.blurTint} style={StyleSheet.absoluteFill} />
+            <Text style={[styles.tooltipName, { color: accent }]}>{settings?.companionName ?? "Empiri"}</Text>
+            <Text style={[styles.tooltipStatus, { color: colors.mutedForeground }]} numberOfLines={1}>
+              {orbStatusText}
+            </Text>
+          </View>
+
+          {/* Orb itself */}
+          <Pressable
+            onPress={handleOpenPeek}
+            testID="inner-self-button"
+            accessibilityRole="button"
+            accessibilityLabel="Peek inside Empiri"
+            hitSlop={10}
+          >
+            <CompanionOrb
+              status={status}
+              mood={mood.label}
+              size={ORB_SIZE}
+              traits={traits}
+            />
+          </Pressable>
+        </Animated.View>
+      </GestureDetector>
+
+      <InnerSelfSheet
+        visible={peekVisible}
+        conversationId={conversationId}
+        onClose={() => setPeekVisible(false)}
+        warmth={smoothWarmth}
+        companionName={companionName}
+      />
+
+      {/* Rename-chat modal */}
       <Modal
-        visible={switcherOpen}
+        visible={renameVisible}
         transparent
-        animationType="slide"
-        onRequestClose={() => setSwitcherOpen(false)}
+        animationType="fade"
+        onRequestClose={() => setRenameVisible(false)}
       >
         <Pressable
-          style={styles.modalOverlay}
-          onPress={() => setSwitcherOpen(false)}
+          style={styles.renameBackdrop}
+          onPress={() => !renameSaving && setRenameVisible(false)}
         >
           <Pressable
             style={[
-              styles.sheet,
-              { backgroundColor: colors.background, paddingBottom: insets.bottom + 16 },
+              styles.renameCard,
+              { backgroundColor: colors.background, borderColor: colors.glassBorder },
             ]}
-            onPress={(e) => e.stopPropagation()}
+            onPress={() => {}}
           >
-            <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
-            <View style={styles.sheetHeader}>
-              <Text style={[styles.sheetTitle, { color: colors.foreground }]}>
-                Your chats
-              </Text>
-              <TouchableOpacity
-                onPress={handleNewChat}
-                style={[styles.newChatBtn, { backgroundColor: colors.foreground }]}
-                disabled={isStreaming}
-                accessibilityRole="button"
-                accessibilityLabel="New chat"
-              >
-                <Feather name="plus" size={16} color={colors.background} />
-                <Text style={[styles.newChatText, { color: colors.background }]}>
-                  New
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            <FlatList
-              data={conversations}
-              keyExtractor={(c) => String(c.id)}
-              style={styles.convList}
-              keyboardShouldPersistTaps="handled"
-              renderItem={({ item }) => {
-                const active = item.id === activeConversationId;
-                return (
-                  <TouchableOpacity
-                    style={[
-                      styles.convRow,
-                      { borderColor: colors.border },
-                      active && { backgroundColor: colors.muted },
-                    ]}
-                    onPress={() => handleSwitch(item.id)}
-                    disabled={isStreaming}
-                    activeOpacity={0.7}
-                  >
-                    <Feather
-                      name="message-circle"
-                      size={16}
-                      color={active ? colors.foreground : colors.mutedForeground}
-                    />
-                    <Text
-                      style={[
-                        styles.convTitle,
-                        { color: active ? colors.foreground : colors.mutedForeground },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {item.title}
-                    </Text>
-                    {active && (
-                      <Feather name="check" size={16} color={colors.foreground} />
-                    )}
-                  </TouchableOpacity>
-                );
-              }}
-              ListEmptyComponent={
-                <Text style={[styles.convEmpty, { color: colors.mutedForeground }]}>
-                  No chats yet.
-                </Text>
-              }
+            <Text style={[styles.renameTitle, { color: colors.foreground }]}>
+              Rename chat
+            </Text>
+            <TextInput
+              value={renameDraft}
+              onChangeText={setRenameDraft}
+              placeholder="Chat name"
+              placeholderTextColor={colors.mutedForeground}
+              maxLength={80}
+              autoFocus
+              editable={!renameSaving}
+              onSubmitEditing={submitRename}
+              returnKeyType="done"
+              testID="rename-input"
+              style={[
+                styles.renameInput,
+                {
+                  color: colors.foreground,
+                  borderColor: renameError ? colors.destructive : colors.glassBorder,
+                  backgroundColor: colors.glass,
+                },
+              ]}
             />
+            {renameError ? (
+              <Text style={[styles.renameError, { color: colors.destructive }]}>
+                {renameError}
+              </Text>
+            ) : null}
+            <View style={styles.renameActions}>
+              <Pressable
+                onPress={() => setRenameVisible(false)}
+                disabled={renameSaving}
+                style={({ pressed }) => [
+                  styles.renameBtn,
+                  { opacity: pressed || renameSaving ? 0.6 : 1 },
+                ]}
+              >
+                <Text style={[styles.renameBtnText, { color: colors.mutedForeground }]}>
+                  Cancel
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={submitRename}
+                disabled={renameSaving}
+                testID="rename-save"
+                style={({ pressed }) => [
+                  styles.renameBtn,
+                  styles.renameBtnPrimary,
+                  {
+                    backgroundColor: primaryAccent,
+                    opacity: pressed || renameSaving ? 0.7 : 1,
+                  },
+                ]}
+              >
+                {renameSaving ? (
+                  <ActivityIndicator size="small" color={colors.primaryForeground} />
+                ) : (
+                  <Text style={[styles.renameBtnText, { color: colors.primaryForeground }]}>
+                    Save
+                  </Text>
+                )}
+              </Pressable>
+            </View>
           </Pressable>
         </Pressable>
       </Modal>
+
+      <ChatSwitcherSheet
+        visible={switcherVisible}
+        chats={chats}
+        activeId={conversationId}
+        onSelect={openConversation}
+        onNewChat={startNewChat}
+        onRenameActive={() => {
+          setSwitcherVisible(false);
+          openRename();
+        }}
+        onDeleteChat={deleteConversation}
+        onRefresh={() => {
+          refreshChats().catch(() => {});
+        }}
+        onClose={() => setSwitcherVisible(false)}
+        accent={accent}
+      />
+
+      <CheckInSettingsSheet
+        visible={settingsVisible}
+        cadence={checkInCadence}
+        onSelect={setCheckInCadence}
+        quietHours={quietHours}
+        onQuietHoursChange={setQuietHours}
+        sensesEnabled={sensesEnabled}
+        onSensesToggle={toggleSenses}
+        onClose={() => setSettingsVisible(false)}
+        accent={accent}
+        onPersonalize={handlePersonalize}
+        onSignOut={handleSignOut}
+        onDevCheckIn={__DEV__ ? handleDevCheckIn : undefined}
+        onDevNudge={__DEV__ ? handleDevNudge : undefined}
+        onDevRegress={__DEV__ ? handleDevRegress : undefined}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
+  root: { flex: 1 },
+  flex: { flex: 1 },
+  center: {
+    flex: 1, alignItems: "center", justifyContent: "center",
+    paddingHorizontal: 40, gap: 12,
   },
+  emptyTitle: {
+    fontSize: 21, fontFamily: FONTS.bold, letterSpacing: -0.3,
+  },
+  emptyText: {
+    fontSize: 15, lineHeight: 21, textAlign: "center", fontFamily: FONTS.regular,
+  },
+  retry: {
+    marginTop: 6, paddingHorizontal: 24, paddingVertical: 11, borderRadius: 22,
+  },
+  retryText: {
+    fontSize: 15, fontFamily: FONTS.semibold,
+  },
+  listContent: { paddingVertical: 12 },
+  // Chat title header
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 16,
+    paddingBottom: 2,
   },
-  userInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    flex: 1,
-  },
-  avatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-  },
-  avatarFallback: {
+  switcherBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarInitial: {
-    fontSize: 14,
-    fontWeight: "700",
+  switcherBtnSpacer: {
+    width: 30,
+    height: 30,
   },
-  userName: {
-    fontSize: 15,
-    fontWeight: "600",
+  titleRow: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: 8,
+  },
+  titlePressable: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
     flexShrink: 1,
   },
-  headerActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
+  titleText: {
+    fontSize: 15,
+    fontFamily: FONTS.semibold,
+    letterSpacing: -0.2,
+    flexShrink: 1,
   },
-  iconBtn: {
-    padding: 4,
+  toneBadge: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
   },
-  list: {
-    paddingVertical: 12,
-    gap: 4,
+  toneBadgeText: {
+    fontSize: 10.5,
+    fontFamily: FONTS.semibold,
+    letterSpacing: 0.3,
   },
-  listEmpty: {
+  renameIconBtn: {
+    padding: 2,
+  },
+  // Rename modal
+  renameBackdrop: {
     flex: 1,
-  },
-  emptyContainer: {
-    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 40,
+    paddingHorizontal: 28,
+  },
+  renameCard: {
+    width: "100%",
+    maxWidth: 400,
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 20,
     gap: 12,
   },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    textAlign: "center",
+  renameTitle: {
+    fontSize: 17,
+    fontFamily: FONTS.bold,
+    letterSpacing: -0.3,
   },
-  emptySubtitle: {
-    fontSize: 14,
-    textAlign: "center",
-    lineHeight: 22,
+  renameInput: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 15,
+    fontFamily: FONTS.regular,
   },
-  modalOverlay: {
-    flex: 1,
+  renameError: {
+    fontSize: 13,
+    fontFamily: FONTS.medium,
+  },
+  renameActions: {
+    flexDirection: "row",
     justifyContent: "flex-end",
-    backgroundColor: "rgba(0,0,0,0.4)",
+    gap: 10,
+    marginTop: 2,
   },
-  sheet: {
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    maxHeight: "70%",
+  renameBtn: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 78,
   },
-  sheetHandle: {
-    alignSelf: "center",
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    marginBottom: 12,
+  renameBtnPrimary: {},
+  renameBtnText: {
+    fontSize: 14.5,
+    fontFamily: FONTS.semibold,
   },
-  sheetHeader: {
+  // "While you were away" reflection card
+  reflectionCard: {
+    marginHorizontal: 14,
+    marginBottom: 6,
+    marginTop: 2,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  reflectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 6,
+  },
+  reflectionLabel: {
+    flex: 1,
+    fontSize: 11.5,
+    fontFamily: FONTS.semibold,
+    letterSpacing: 0.3,
+    textTransform: "uppercase",
+  },
+  reflectionText: {
+    fontSize: 14.5,
+    fontFamily: FONTS.regular,
+    lineHeight: 20,
+    fontStyle: "italic",
+  },
+  errorBanner: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    marginHorizontal: 14, marginBottom: 4,
+    paddingHorizontal: 14, paddingVertical: 10, borderRadius: 14,
+  },
+  errorText: {
+    flex: 1, color: "#fff", fontSize: 13.5, fontFamily: FONTS.medium,
+  },
+  // In-call bar (shown above ChatInput when audio-call mode is active)
+  callBar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 12,
+    marginHorizontal: 14,
+    marginBottom: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
   },
-  sheetTitle: {
-    fontSize: 17,
-    fontWeight: "700",
+  callStatusRow: {
+    flexDirection: "row", alignItems: "center", gap: 6,
   },
-  newChatBtn: {
+  callStatusText: {
+    fontSize: 13.5, fontFamily: FONTS.medium,
+  },
+  endCallBtn: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
+    gap: 5,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 999,
+    borderRadius: 10,
   },
-  newChatText: {
-    fontSize: 13,
-    fontWeight: "600",
+  endCallText: {
+    color: "#fff", fontSize: 13, fontFamily: FONTS.semibold,
   },
-  convList: {
-    flexGrow: 0,
-  },
-  convRow: {
+  // Bottom nav
+  navRow: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    marginBottom: 8,
+    justifyContent: "space-around",
+    paddingTop: 6,
+    paddingBottom: 4,
+    paddingHorizontal: 10,
   },
-  convTitle: {
-    flex: 1,
-    fontSize: 15,
-    fontWeight: "500",
+  navBtn: {
+    flex: 1, alignItems: "center", gap: 4,
   },
-  convEmpty: {
-    textAlign: "center",
-    paddingVertical: 24,
-    fontSize: 14,
+  navBtnIcon: {
+    width: 48, height: 48, borderRadius: 16,
+    borderWidth: 1,
+    alignItems: "center", justifyContent: "center",
+    overflow: "hidden",
+  },
+  navBtnLabel: {
+    fontSize: 10.5, fontFamily: FONTS.medium,
+  },
+  // Floating orb tooltip
+  tooltip: {
+    position: "absolute",
+    top: 6,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    overflow: "hidden",
+    minWidth: 100,
+  },
+  tooltipName: {
+    fontSize: 12, fontFamily: FONTS.bold, letterSpacing: 0.1,
+  },
+  tooltipStatus: {
+    fontSize: 11, fontFamily: FONTS.regular, marginTop: 1,
   },
 });

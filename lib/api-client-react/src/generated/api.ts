@@ -20,24 +20,37 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  ApiError,
   AuthUserEnvelope,
   BeginBrowserLoginParams,
+  CheckInInput,
   ClearConversationSuccess,
-  CompanionSettingsEnvelope,
-  ConversationDetailEnvelope,
+  CompanionMemory,
+  CompanionSelf,
+  CompanionSelfHistory,
+  CompanionSettings,
+  CompanionSettingsInput,
+  Conversation,
   ConversationEnvelope,
-  ConversationListEnvelope,
-  CreateConversationRequest,
+  ConversationInput,
+  ConversationUpdate,
   DeleteAccountSuccess,
   ErrorEnvelope,
   HandleBrowserLoginCallbackParams,
   HealthStatus,
   LogoutSuccess,
+  Message,
+  MessageInput,
   MobileTokenExchangeRequest,
   MobileTokenExchangeSuccess,
   SaveMessageRequest,
   SaveMessageResponse,
-  UpdateCompanionSettingsRequest
+  SendMessageResult,
+  SpeechInput,
+  SpeechResult,
+  TranscribeInput,
+  TranscribeResult,
+  UpdateCompanionMemoryInput
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -602,11 +615,12 @@ export const getListConversationsUrl = () => {
 }
 
 /**
- * @summary List the authenticated user's conversations
+ * Returns the conversations owned by the authenticated user, oldest first. Used to resume an existing conversation on a fresh install or new device.
+ * @summary List the signed-in user's conversations
  */
-export const listConversations = async ( options?: RequestInit): Promise<ConversationListEnvelope> => {
+export const listConversations = async ( options?: RequestInit): Promise<Conversation[]> => {
 
-  return customFetch<ConversationListEnvelope>(getListConversationsUrl(),
+  return customFetch<Conversation[]>(getListConversationsUrl(),
   {
     ...options,
     method: 'GET'
@@ -626,7 +640,7 @@ export const getListConversationsQueryKey = () => {
     }
 
 
-export const getListConversationsQueryOptions = <TData = Awaited<ReturnType<typeof listConversations>>, TError = ErrorType<ErrorEnvelope>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listConversations>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getListConversationsQueryOptions = <TData = Awaited<ReturnType<typeof listConversations>>, TError = ErrorType<ApiError>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listConversations>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -645,14 +659,14 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListConversationsQueryResult = NonNullable<Awaited<ReturnType<typeof listConversations>>>
-export type ListConversationsQueryError = ErrorType<ErrorEnvelope>
+export type ListConversationsQueryError = ErrorType<ApiError>
 
 
 /**
- * @summary List the authenticated user's conversations
+ * @summary List the signed-in user's conversations
  */
 
-export function useListConversations<TData = Awaited<ReturnType<typeof listConversations>>, TError = ErrorType<ErrorEnvelope>>(
+export function useListConversations<TData = Awaited<ReturnType<typeof listConversations>>, TError = ErrorType<ApiError>>(
   options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listConversations>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
@@ -679,26 +693,26 @@ export const getCreateConversationUrl = () => {
 }
 
 /**
- * @summary Create a new conversation for the authenticated user
+ * @summary Create a new conversation
  */
-export const createConversation = async (createConversationRequest?: CreateConversationRequest, options?: RequestInit): Promise<ConversationDetailEnvelope> => {
+export const createConversation = async (conversationInput: ConversationInput, options?: RequestInit): Promise<Conversation> => {
 
-  return customFetch<ConversationDetailEnvelope>(getCreateConversationUrl(),
+  return customFetch<Conversation>(getCreateConversationUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(
-      createConversationRequest,)
+      conversationInput,)
   }
 );}
 
 
 
 
-export const getCreateConversationMutationOptions = <TError = ErrorType<ErrorEnvelope>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createConversation>>, TError,{data?: BodyType<CreateConversationRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof createConversation>>, TError,{data?: BodyType<CreateConversationRequest>}, TContext> => {
+export const getCreateConversationMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createConversation>>, TError,{data: BodyType<ConversationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createConversation>>, TError,{data: BodyType<ConversationInput>}, TContext> => {
 
 const mutationKey = ['createConversation'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -710,7 +724,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createConversation>>, {data?: BodyType<CreateConversationRequest>}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createConversation>>, {data: BodyType<ConversationInput>}> = (props) => {
           const {data} = props ?? {};
 
           return  createConversation(data,requestOptions)
@@ -724,21 +738,1060 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type CreateConversationMutationResult = NonNullable<Awaited<ReturnType<typeof createConversation>>>
-    export type CreateConversationMutationBody = BodyType<CreateConversationRequest> | undefined
-    export type CreateConversationMutationError = ErrorType<ErrorEnvelope>
+    export type CreateConversationMutationBody = BodyType<ConversationInput>
+    export type CreateConversationMutationError = ErrorType<ApiError>
 
     /**
- * @summary Create a new conversation for the authenticated user
+ * @summary Create a new conversation
  */
-export const useCreateConversation = <TError = ErrorType<ErrorEnvelope>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createConversation>>, TError,{data?: BodyType<CreateConversationRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useCreateConversation = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createConversation>>, TError,{data: BodyType<ConversationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof createConversation>>,
         TError,
-        {data?: BodyType<CreateConversationRequest>},
+        {data: BodyType<ConversationInput>},
         TContext
       > => {
       return useMutation(getCreateConversationMutationOptions(options));
+    }
+
+export const getGetConversationUrl = (id: number,) => {
+
+
+
+
+  return `/api/conversations/${id}`
+}
+
+/**
+ * @summary Fetch a single conversation
+ */
+export const getConversation = async (id: number, options?: RequestInit): Promise<Conversation> => {
+
+  return customFetch<Conversation>(getGetConversationUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetConversationQueryKey = (id: number,) => {
+    return [
+    `/api/conversations/${id}`
+    ] as const;
+    }
+
+
+export const getGetConversationQueryOptions = <TData = Awaited<ReturnType<typeof getConversation>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getConversation>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetConversationQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getConversation>>> = ({ signal }) => getConversation(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getConversation>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetConversationQueryResult = NonNullable<Awaited<ReturnType<typeof getConversation>>>
+export type GetConversationQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Fetch a single conversation
+ */
+
+export function useGetConversation<TData = Awaited<ReturnType<typeof getConversation>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getConversation>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetConversationQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getRenameConversationUrl = (id: number,) => {
+
+
+
+
+  return `/api/conversations/${id}`
+}
+
+/**
+ * @summary Rename a conversation
+ */
+export const renameConversation = async (id: number,
+    conversationUpdate: ConversationUpdate, options?: RequestInit): Promise<Conversation> => {
+
+  return customFetch<Conversation>(getRenameConversationUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      conversationUpdate,)
+  }
+);}
+
+
+
+
+export const getRenameConversationMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameConversation>>, TError,{id: number;data: BodyType<ConversationUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof renameConversation>>, TError,{id: number;data: BodyType<ConversationUpdate>}, TContext> => {
+
+const mutationKey = ['renameConversation'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof renameConversation>>, {id: number;data: BodyType<ConversationUpdate>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  renameConversation(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RenameConversationMutationResult = NonNullable<Awaited<ReturnType<typeof renameConversation>>>
+    export type RenameConversationMutationBody = BodyType<ConversationUpdate>
+    export type RenameConversationMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Rename a conversation
+ */
+export const useRenameConversation = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameConversation>>, TError,{id: number;data: BodyType<ConversationUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof renameConversation>>,
+        TError,
+        {id: number;data: BodyType<ConversationUpdate>},
+        TContext
+      > => {
+      return useMutation(getRenameConversationMutationOptions(options));
+    }
+
+export const getListMessagesUrl = (id: number,) => {
+
+
+
+
+  return `/api/conversations/${id}/messages`
+}
+
+/**
+ * @summary List messages in a conversation
+ */
+export const listMessages = async (id: number, options?: RequestInit): Promise<Message[]> => {
+
+  return customFetch<Message[]>(getListMessagesUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListMessagesQueryKey = (id: number,) => {
+    return [
+    `/api/conversations/${id}/messages`
+    ] as const;
+    }
+
+
+export const getListMessagesQueryOptions = <TData = Awaited<ReturnType<typeof listMessages>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMessages>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListMessagesQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMessages>>> = ({ signal }) => listMessages(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listMessages>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListMessagesQueryResult = NonNullable<Awaited<ReturnType<typeof listMessages>>>
+export type ListMessagesQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary List messages in a conversation
+ */
+
+export function useListMessages<TData = Awaited<ReturnType<typeof listMessages>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMessages>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListMessagesQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSendMessageUrl = (id: number,) => {
+
+
+
+
+  return `/api/conversations/${id}/messages`
+}
+
+/**
+ * @summary Send a text message and receive the companion's reply
+ */
+export const sendMessage = async (id: number,
+    messageInput: MessageInput, options?: RequestInit): Promise<SendMessageResult> => {
+
+  return customFetch<SendMessageResult>(getSendMessageUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      messageInput,)
+  }
+);}
+
+
+
+
+export const getSendMessageMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendMessage>>, TError,{id: number;data: BodyType<MessageInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof sendMessage>>, TError,{id: number;data: BodyType<MessageInput>}, TContext> => {
+
+const mutationKey = ['sendMessage'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof sendMessage>>, {id: number;data: BodyType<MessageInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  sendMessage(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SendMessageMutationResult = NonNullable<Awaited<ReturnType<typeof sendMessage>>>
+    export type SendMessageMutationBody = BodyType<MessageInput>
+    export type SendMessageMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Send a text message and receive the companion's reply
+ */
+export const useSendMessage = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendMessage>>, TError,{id: number;data: BodyType<MessageInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof sendMessage>>,
+        TError,
+        {id: number;data: BodyType<MessageInput>},
+        TContext
+      > => {
+      return useMutation(getSendMessageMutationOptions(options));
+    }
+
+export const getCompanionCheckInUrl = (id: number,) => {
+
+
+
+
+  return `/api/conversations/${id}/checkin`
+}
+
+/**
+ * @summary Generate a proactive companion check-in greeting
+ */
+export const companionCheckIn = async (id: number,
+    checkInInput: CheckInInput, options?: RequestInit): Promise<Message> => {
+
+  return customFetch<Message>(getCompanionCheckInUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      checkInInput,)
+  }
+);}
+
+
+
+
+export const getCompanionCheckInMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof companionCheckIn>>, TError,{id: number;data: BodyType<CheckInInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof companionCheckIn>>, TError,{id: number;data: BodyType<CheckInInput>}, TContext> => {
+
+const mutationKey = ['companionCheckIn'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof companionCheckIn>>, {id: number;data: BodyType<CheckInInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  companionCheckIn(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CompanionCheckInMutationResult = NonNullable<Awaited<ReturnType<typeof companionCheckIn>>>
+    export type CompanionCheckInMutationBody = BodyType<CheckInInput>
+    export type CompanionCheckInMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Generate a proactive companion check-in greeting
+ */
+export const useCompanionCheckIn = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof companionCheckIn>>, TError,{id: number;data: BodyType<CheckInInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof companionCheckIn>>,
+        TError,
+        {id: number;data: BodyType<CheckInInput>},
+        TContext
+      > => {
+      return useMutation(getCompanionCheckInMutationOptions(options));
+    }
+
+export const getGetCompanionSelfUrl = (id: number,) => {
+
+
+
+
+  return `/api/conversations/${id}/self`
+}
+
+/**
+ * Returns a friendly summary of the companion's evolving inner self (drives, traits, interests, and self-narrative) for the given conversation.
+ * @summary Get the companion's current inner self
+ */
+export const getCompanionSelf = async (id: number, options?: RequestInit): Promise<CompanionSelf> => {
+
+  return customFetch<CompanionSelf>(getGetCompanionSelfUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCompanionSelfQueryKey = (id: number,) => {
+    return [
+    `/api/conversations/${id}/self`
+    ] as const;
+    }
+
+
+export const getGetCompanionSelfQueryOptions = <TData = Awaited<ReturnType<typeof getCompanionSelf>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCompanionSelf>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCompanionSelfQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCompanionSelf>>> = ({ signal }) => getCompanionSelf(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCompanionSelf>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCompanionSelfQueryResult = NonNullable<Awaited<ReturnType<typeof getCompanionSelf>>>
+export type GetCompanionSelfQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Get the companion's current inner self
+ */
+
+export function useGetCompanionSelf<TData = Awaited<ReturnType<typeof getCompanionSelf>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCompanionSelf>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCompanionSelfQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetCompanionSelfHistoryUrl = (id: number,) => {
+
+
+
+
+  return `/api/conversations/${id}/self/history`
+}
+
+/**
+ * Returns the timeline of inner-self snapshots (drives, traits, and emerging curiosities) captured over the life of the conversation, oldest first. Capped to the most recent snapshots so very long-lived timelines stay fast.
+ * @summary Get how the companion has grown over time
+ */
+export const getCompanionSelfHistory = async (id: number, options?: RequestInit): Promise<CompanionSelfHistory> => {
+
+  return customFetch<CompanionSelfHistory>(getGetCompanionSelfHistoryUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCompanionSelfHistoryQueryKey = (id: number,) => {
+    return [
+    `/api/conversations/${id}/self/history`
+    ] as const;
+    }
+
+
+export const getGetCompanionSelfHistoryQueryOptions = <TData = Awaited<ReturnType<typeof getCompanionSelfHistory>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCompanionSelfHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCompanionSelfHistoryQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCompanionSelfHistory>>> = ({ signal }) => getCompanionSelfHistory(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCompanionSelfHistory>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCompanionSelfHistoryQueryResult = NonNullable<Awaited<ReturnType<typeof getCompanionSelfHistory>>>
+export type GetCompanionSelfHistoryQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Get how the companion has grown over time
+ */
+
+export function useGetCompanionSelfHistory<TData = Awaited<ReturnType<typeof getCompanionSelfHistory>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCompanionSelfHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCompanionSelfHistoryQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetCompanionMemoryUrl = (id: number,) => {
+
+
+
+
+  return `/api/conversations/${id}/memory`
+}
+
+/**
+ * Returns the rolling context summary of earlier messages that have slid out of the live window, or null if nothing has been summarised yet.
+ * @summary Get what the companion remembers about the conversation
+ */
+export const getCompanionMemory = async (id: number, options?: RequestInit): Promise<CompanionMemory> => {
+
+  return customFetch<CompanionMemory>(getGetCompanionMemoryUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCompanionMemoryQueryKey = (id: number,) => {
+    return [
+    `/api/conversations/${id}/memory`
+    ] as const;
+    }
+
+
+export const getGetCompanionMemoryQueryOptions = <TData = Awaited<ReturnType<typeof getCompanionMemory>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCompanionMemory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCompanionMemoryQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCompanionMemory>>> = ({ signal }) => getCompanionMemory(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCompanionMemory>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCompanionMemoryQueryResult = NonNullable<Awaited<ReturnType<typeof getCompanionMemory>>>
+export type GetCompanionMemoryQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Get what the companion remembers about the conversation
+ */
+
+export function useGetCompanionMemory<TData = Awaited<ReturnType<typeof getCompanionMemory>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCompanionMemory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCompanionMemoryQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getUpdateCompanionMemoryUrl = (id: number,) => {
+
+
+
+
+  return `/api/conversations/${id}/memory`
+}
+
+/**
+ * Replaces the rolling context summary with user-provided text so the user can correct or trim what the companion recalls.
+ * @summary Edit what the companion remembers about the conversation
+ */
+export const updateCompanionMemory = async (id: number,
+    updateCompanionMemoryInput: UpdateCompanionMemoryInput, options?: RequestInit): Promise<CompanionMemory> => {
+
+  return customFetch<CompanionMemory>(getUpdateCompanionMemoryUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      updateCompanionMemoryInput,)
+  }
+);}
+
+
+
+
+export const getUpdateCompanionMemoryMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCompanionMemory>>, TError,{id: number;data: BodyType<UpdateCompanionMemoryInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateCompanionMemory>>, TError,{id: number;data: BodyType<UpdateCompanionMemoryInput>}, TContext> => {
+
+const mutationKey = ['updateCompanionMemory'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateCompanionMemory>>, {id: number;data: BodyType<UpdateCompanionMemoryInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateCompanionMemory(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateCompanionMemoryMutationResult = NonNullable<Awaited<ReturnType<typeof updateCompanionMemory>>>
+    export type UpdateCompanionMemoryMutationBody = BodyType<UpdateCompanionMemoryInput>
+    export type UpdateCompanionMemoryMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Edit what the companion remembers about the conversation
+ */
+export const useUpdateCompanionMemory = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCompanionMemory>>, TError,{id: number;data: BodyType<UpdateCompanionMemoryInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateCompanionMemory>>,
+        TError,
+        {id: number;data: BodyType<UpdateCompanionMemoryInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateCompanionMemoryMutationOptions(options));
+    }
+
+export const getClearCompanionMemoryUrl = (id: number,) => {
+
+
+
+
+  return `/api/conversations/${id}/memory`
+}
+
+/**
+ * Removes the stored rolling context summary and resets the summariser watermark, returning the memory to its empty state.
+ * @summary Clear what the companion remembers about the conversation
+ */
+export const clearCompanionMemory = async (id: number, options?: RequestInit): Promise<CompanionMemory> => {
+
+  return customFetch<CompanionMemory>(getClearCompanionMemoryUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getClearCompanionMemoryMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearCompanionMemory>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof clearCompanionMemory>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['clearCompanionMemory'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof clearCompanionMemory>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  clearCompanionMemory(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ClearCompanionMemoryMutationResult = NonNullable<Awaited<ReturnType<typeof clearCompanionMemory>>>
+
+    export type ClearCompanionMemoryMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Clear what the companion remembers about the conversation
+ */
+export const useClearCompanionMemory = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearCompanionMemory>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof clearCompanionMemory>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getClearCompanionMemoryMutationOptions(options));
+    }
+
+export const getTranscribeAudioUrl = () => {
+
+
+
+
+  return `/api/voice/transcribe`
+}
+
+/**
+ * @summary Transcribe recorded audio into text
+ */
+export const transcribeAudio = async (transcribeInput: TranscribeInput, options?: RequestInit): Promise<TranscribeResult> => {
+
+  return customFetch<TranscribeResult>(getTranscribeAudioUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      transcribeInput,)
+  }
+);}
+
+
+
+
+export const getTranscribeAudioMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof transcribeAudio>>, TError,{data: BodyType<TranscribeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof transcribeAudio>>, TError,{data: BodyType<TranscribeInput>}, TContext> => {
+
+const mutationKey = ['transcribeAudio'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof transcribeAudio>>, {data: BodyType<TranscribeInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  transcribeAudio(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type TranscribeAudioMutationResult = NonNullable<Awaited<ReturnType<typeof transcribeAudio>>>
+    export type TranscribeAudioMutationBody = BodyType<TranscribeInput>
+    export type TranscribeAudioMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Transcribe recorded audio into text
+ */
+export const useTranscribeAudio = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof transcribeAudio>>, TError,{data: BodyType<TranscribeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof transcribeAudio>>,
+        TError,
+        {data: BodyType<TranscribeInput>},
+        TContext
+      > => {
+      return useMutation(getTranscribeAudioMutationOptions(options));
+    }
+
+export const getGetCompanionSettingsUrl = () => {
+
+
+
+
+  return `/api/companion-settings`
+}
+
+/**
+ * Returns stored settings, creating defaults on first call.
+ * @summary Get the companion personalisation settings for the current user
+ */
+export const getCompanionSettings = async ( options?: RequestInit): Promise<CompanionSettings> => {
+
+  return customFetch<CompanionSettings>(getGetCompanionSettingsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCompanionSettingsQueryKey = () => {
+    return [
+    `/api/companion-settings`
+    ] as const;
+    }
+
+
+export const getGetCompanionSettingsQueryOptions = <TData = Awaited<ReturnType<typeof getCompanionSettings>>, TError = ErrorType<ApiError>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCompanionSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCompanionSettingsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCompanionSettings>>> = ({ signal }) => getCompanionSettings({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCompanionSettings>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCompanionSettingsQueryResult = NonNullable<Awaited<ReturnType<typeof getCompanionSettings>>>
+export type GetCompanionSettingsQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Get the companion personalisation settings for the current user
+ */
+
+export function useGetCompanionSettings<TData = Awaited<ReturnType<typeof getCompanionSettings>>, TError = ErrorType<ApiError>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCompanionSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCompanionSettingsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getUpdateCompanionSettingsUrl = () => {
+
+
+
+
+  return `/api/companion-settings`
+}
+
+/**
+ * @summary Save companion personalisation settings
+ */
+export const updateCompanionSettings = async (companionSettingsInput: CompanionSettingsInput, options?: RequestInit): Promise<CompanionSettings> => {
+
+  return customFetch<CompanionSettings>(getUpdateCompanionSettingsUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      companionSettingsInput,)
+  }
+);}
+
+
+
+
+export const getUpdateCompanionSettingsMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCompanionSettings>>, TError,{data: BodyType<CompanionSettingsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateCompanionSettings>>, TError,{data: BodyType<CompanionSettingsInput>}, TContext> => {
+
+const mutationKey = ['updateCompanionSettings'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateCompanionSettings>>, {data: BodyType<CompanionSettingsInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateCompanionSettings(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateCompanionSettingsMutationResult = NonNullable<Awaited<ReturnType<typeof updateCompanionSettings>>>
+    export type UpdateCompanionSettingsMutationBody = BodyType<CompanionSettingsInput>
+    export type UpdateCompanionSettingsMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Save companion personalisation settings
+ */
+export const useUpdateCompanionSettings = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCompanionSettings>>, TError,{data: BodyType<CompanionSettingsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateCompanionSettings>>,
+        TError,
+        {data: BodyType<CompanionSettingsInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateCompanionSettingsMutationOptions(options));
+    }
+
+export const getSynthesizeSpeechUrl = () => {
+
+
+
+
+  return `/api/voice/speech`
+}
+
+/**
+ * @summary Convert text into spoken audio
+ */
+export const synthesizeSpeech = async (speechInput: SpeechInput, options?: RequestInit): Promise<SpeechResult> => {
+
+  return customFetch<SpeechResult>(getSynthesizeSpeechUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      speechInput,)
+  }
+);}
+
+
+
+
+export const getSynthesizeSpeechMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof synthesizeSpeech>>, TError,{data: BodyType<SpeechInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof synthesizeSpeech>>, TError,{data: BodyType<SpeechInput>}, TContext> => {
+
+const mutationKey = ['synthesizeSpeech'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof synthesizeSpeech>>, {data: BodyType<SpeechInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  synthesizeSpeech(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SynthesizeSpeechMutationResult = NonNullable<Awaited<ReturnType<typeof synthesizeSpeech>>>
+    export type SynthesizeSpeechMutationBody = BodyType<SpeechInput>
+    export type SynthesizeSpeechMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Convert text into spoken audio
+ */
+export const useSynthesizeSpeech = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof synthesizeSpeech>>, TError,{data: BodyType<SpeechInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof synthesizeSpeech>>,
+        TError,
+        {data: BodyType<SpeechInput>},
+        TContext
+      > => {
+      return useMutation(getSynthesizeSpeechMutationOptions(options));
     }
 
 export const getGetConversationMessagesUrl = (conversationId: number,) => {
@@ -1029,152 +2082,3 @@ export const useDeleteAccount = <TError = ErrorType<ErrorEnvelope>,
       > => {
       return useMutation(getDeleteAccountMutationOptions(options));
     }
-
-export const getGetCompanionSettingsUrl = () => {
-
-
-
-
-  return `/api/companion-settings`
-}
-
-/**
- * @summary Load the authenticated user's companion settings
- */
-export const getCompanionSettings = async ( options?: RequestInit): Promise<CompanionSettingsEnvelope> => {
-
-  return customFetch<CompanionSettingsEnvelope>(getGetCompanionSettingsUrl(),
-  {
-    ...options,
-    method: 'GET'
-
-
-  }
-);}
-
-
-
-
-
-export const getGetCompanionSettingsQueryKey = () => {
-    return [
-    `/api/companion-settings`
-    ] as const;
-    }
-
-
-export const getGetCompanionSettingsQueryOptions = <TData = Awaited<ReturnType<typeof getCompanionSettings>>, TError = ErrorType<ErrorEnvelope>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCompanionSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
-) => {
-
-const {query: queryOptions, request: requestOptions} = options ?? {};
-
-  const queryKey =  queryOptions?.queryKey ?? getGetCompanionSettingsQueryKey();
-
-
-
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCompanionSettings>>> = ({ signal }) => getCompanionSettings({ signal, ...requestOptions });
-
-
-
-
-
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCompanionSettings>>, TError, TData> & { queryKey: QueryKey }
-}
-
-export type GetCompanionSettingsQueryResult = NonNullable<Awaited<ReturnType<typeof getCompanionSettings>>>
-export type GetCompanionSettingsQueryError = ErrorType<ErrorEnvelope>
-
-
-/**
- * @summary Load the authenticated user's companion settings
- */
-
-export function useGetCompanionSettings<TData = Awaited<ReturnType<typeof getCompanionSettings>>, TError = ErrorType<ErrorEnvelope>>(
-  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCompanionSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
-
- ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-
-  const queryOptions = getGetCompanionSettingsQueryOptions(options)
-
-  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
-
-  return { ...query, queryKey: queryOptions.queryKey };
-}
-
-
-
-
-
-
-
-export const getUpdateCompanionSettingsUrl = () => {
-
-
-
-
-  return `/api/companion-settings`
-}
-
-/**
- * @summary Update the authenticated user's companion settings
- */
-export const updateCompanionSettings = async (updateCompanionSettingsRequest: UpdateCompanionSettingsRequest, options?: RequestInit): Promise<CompanionSettingsEnvelope> => {
-
-  return customFetch<CompanionSettingsEnvelope>(getUpdateCompanionSettingsUrl(),
-  {
-    ...options,
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(
-      updateCompanionSettingsRequest,)
-  }
-);}
-
-
-
-
-export const getUpdateCompanionSettingsMutationOptions = <TError = ErrorType<ErrorEnvelope>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCompanionSettings>>, TError,{data: BodyType<UpdateCompanionSettingsRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof updateCompanionSettings>>, TError,{data: BodyType<UpdateCompanionSettingsRequest>}, TContext> => {
-
-const mutationKey = ['updateCompanionSettings'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateCompanionSettings>>, {data: BodyType<UpdateCompanionSettingsRequest>}> = (props) => {
-          const {data} = props ?? {};
-
-          return  updateCompanionSettings(data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type UpdateCompanionSettingsMutationResult = NonNullable<Awaited<ReturnType<typeof updateCompanionSettings>>>
-    export type UpdateCompanionSettingsMutationBody = BodyType<UpdateCompanionSettingsRequest>
-    export type UpdateCompanionSettingsMutationError = ErrorType<ErrorEnvelope>
-
-    /**
- * @summary Update the authenticated user's companion settings
- */
-export const useUpdateCompanionSettings = <TError = ErrorType<ErrorEnvelope>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCompanionSettings>>, TError,{data: BodyType<UpdateCompanionSettingsRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof updateCompanionSettings>>,
-        TError,
-        {data: BodyType<UpdateCompanionSettingsRequest>},
-        TContext
-      > => {
-      return useMutation(getUpdateCompanionSettingsMutationOptions(options));
-    }
-

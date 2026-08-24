@@ -1,10 +1,11 @@
 import {
-  Inter_400Regular,
-  Inter_500Medium,
-  Inter_600SemiBold,
-  Inter_700Bold,
+  PlusJakartaSans_400Regular,
+  PlusJakartaSans_500Medium,
+  PlusJakartaSans_600SemiBold,
+  PlusJakartaSans_700Bold,
+  PlusJakartaSans_800ExtraBold,
   useFonts,
-} from "@expo-google-fonts/inter";
+} from "@expo-google-fonts/plus-jakarta-sans";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setAuthTokenGetter, setBaseUrl } from "@workspace/api-client-react";
 import { Stack, useRouter, useSegments } from "expo-router";
@@ -16,12 +17,12 @@ import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { CompanionProvider } from "@/context/CompanionContext";
-import { AuthProvider, useAuth } from "@/lib/auth";
+import { CompanionProvider } from "@/contexts/CompanionContext";
+import { AUTH_TOKEN_KEY, AuthProvider, useAuth } from "@/lib/auth";
 
 const domain = process.env.EXPO_PUBLIC_DOMAIN;
 if (domain) setBaseUrl(`https://${domain}`);
-setAuthTokenGetter(() => SecureStore.getItemAsync("auth_session_token"));
+setAuthTokenGetter(() => SecureStore.getItemAsync(AUTH_TOKEN_KEY));
 
 SplashScreen.preventAutoHideAsync();
 
@@ -40,7 +41,7 @@ function RootLayoutNav() {
     } else if (isAuthenticated && inSignIn) {
       router.replace("/");
     }
-  }, [isLoading, isAuthenticated, segments, router]);
+  }, [isAuthenticated, isLoading, router, segments]);
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
@@ -48,23 +49,25 @@ function RootLayoutNav() {
       <Stack.Screen name="sign-in" />
       <Stack.Screen name="profile" />
       <Stack.Screen name="companion-settings" />
+      <Stack.Screen name="evolution-log" />
     </Stack>
   );
 }
 
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
-    Inter_400Regular,
-    Inter_500Medium,
-    Inter_600SemiBold,
-    Inter_700Bold,
+    PlusJakartaSans_400Regular,
+    PlusJakartaSans_500Medium,
+    PlusJakartaSans_600SemiBold,
+    PlusJakartaSans_700Bold,
+    PlusJakartaSans_800ExtraBold,
   });
 
   useEffect(() => {
     if (fontsLoaded || fontError) {
       SplashScreen.hideAsync();
     }
-  }, [fontsLoaded, fontError]);
+  }, [fontError, fontsLoaded]);
 
   if (!fontsLoaded && !fontError) return null;
 

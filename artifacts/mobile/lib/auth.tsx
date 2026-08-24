@@ -1,11 +1,20 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  type ReactNode,
+} from "react";
 import * as AuthSession from "expo-auth-session";
+import * as Crypto from "expo-crypto";
 import * as WebBrowser from "expo-web-browser";
 import * as SecureStore from "expo-secure-store";
 
 WebBrowser.maybeCompleteAuthSession();
 
-const AUTH_TOKEN_KEY = "auth_session_token";
+export const AUTH_TOKEN_KEY = "auth_session_token";
 const ISSUER_URL = process.env.EXPO_PUBLIC_ISSUER_URL ?? "https://replit.com/oidc";
 
 interface User {
@@ -50,6 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const discovery = AuthSession.useAutoDiscovery(ISSUER_URL);
 
   const redirectUri = AuthSession.makeRedirectUri();
+  const nonce = useMemo(() => Crypto.randomUUID(), []);
 
   const [request, response, promptAsync] = AuthSession.useAuthRequest(
     {
@@ -57,6 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       scopes: ["openid", "email", "profile", "offline_access"],
       redirectUri,
       prompt: AuthSession.Prompt.Login,
+      extraParams: { nonce },
     },
     discovery,
   );
@@ -114,6 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             code_verifier: request.codeVerifier,
             redirect_uri: redirectUri,
             state,
+            nonce,
           }),
         });
 
@@ -134,7 +146,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsLoading(false);
       }
     })();
-  }, [response, request, redirectUri, fetchUser]);
+  }, [response, request, redirectUri, fetchUser, nonce]);
 
   const login = useCallback(async () => {
     try {

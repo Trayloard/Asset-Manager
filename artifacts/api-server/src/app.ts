@@ -1,12 +1,33 @@
 import express, { type Express } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { authMiddleware } from "./middlewares/authMiddleware";
 
 const app: Express = express();
+
+const userOrIpKeyGenerator = (req: express.Request): string =>
+  req.user?.id ?? ipKeyGenerator(req.ip ?? "unknown");
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { error: "Too many authentication attempts. Please try again later." },
+});
+
+const aiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  keyGenerator: userOrIpKeyGenerator,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { error: "Too many requests. Please try again later." },
+});
 
 app.use(
   pinoHttp({
@@ -63,6 +84,10 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use(authMiddleware);
 
+app.use("/api/login", authLimiter);
+app.use("/api/mobile-auth", authLimiter);
+app.use("/api/voice", aiLimiter);
+app.use("/api/conversations", aiLimiter);
 app.use("/api", router);
 
 export default app;

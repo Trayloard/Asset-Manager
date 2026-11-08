@@ -2,8 +2,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import crypto from "crypto";
 import app from "../../app";
-import { db, sessionsTable, usersTable, conversations } from "@workspace/db";
+import { db, sessionsTable, usersTable, conversations, messages } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { loadOrCreateSelf, saveSelf } from "../../lib/companionSelf";
+import { enqueueConversationTask } from "../../lib/messageSignal";
+import { MEMORY_BLOCK_ID, type MemoryData } from "@workspace/neurobrane";
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -51,6 +54,37 @@ async function createTestConversation(ownerId: string): Promise<number> {
 const createdSessions: string[] = [];
 const createdUsers: string[] = [];
 const createdConversations: number[] = [];
+
+it("forget waits for an overlapping self save and does not restore the deleted fact", async () => {
+  const id = await createTestConversation(userAId);
+  createdConversations.push(id);
+  const self = await loadOrCreateSelf(id);
+  self.blocks[MEMORY_BLOCK_ID] = {
+    version: 1, lastUpdatedAt: Date.now(),
+    data: { facts: [{ key: "dog_name", text: "Dog is Milo", salience: 70, lastConfirmedAt: Date.now() }] },
+  };
+  await saveSelf(id, self);
+  let release!: () => void;
+  const barrier = new Promise<void>((resolve) => { release = resolve; });
+  const priorSave = enqueueConversationTask(id, async () => {
+    const old = await loadOrCreateSelf(id);
+    await barrier;
+    await saveSelf(id, old);
+  });
+  const deleting = request(app)
+    .delete(`/api/conversations/${id}/companion/facts/dog_name`)
+    .set("Authorization", `Bearer ${tokenA}`)
+    .then((response) => response);
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  } finally {
+    release();
+  }
+  await priorSave;
+  expect((await deleting).status).toBe(200);
+  const saved = await loadOrCreateSelf(id);
+  expect((saved.blocks[MEMORY_BLOCK_ID].data as MemoryData).facts).toEqual([]);
+});
 
 // ---------------------------------------------------------------------------
 // Test data setup
@@ -316,6 +350,7 @@ describe("cross-user ownership enforcement", () => {
   });
 
   it("DELETE /conversations/:id/memory → 404 for user B and leaves the memory untouched", async () => {
+    const [before] = await db.select().from(conversations).where(eq(conversations.id, convAId));
     const res = await request(app)
       .delete(`/api/conversations/${convAId}/memory`)
       .set("Authorization", `Bearer ${tokenB}`);
@@ -326,6 +361,9 @@ describe("cross-user ownership enforcement", () => {
       .from(conversations)
       .where(eq(conversations.id, convAId));
     expect(row.contextSummary).toBe("Original memory");
+    expect(row.contextSummaryAfterMessageId).toBe(before.contextSummaryAfterMessageId);
+    expect(row.contextSummaryRevision).toBe(before.contextSummaryRevision);
+    expect(row.contextSummaryMessageCount).toBe(before.contextSummaryMessageCount);
 
     // Reset for later tests
     await db
@@ -376,7 +414,9 @@ describe("owner memory editing", () => {
     expect(check.body.summary).toBe("The user loves hiking and has a dog named Rex.");
   });
 
-  it("DELETE /conversations/:id/memory → 200 clears the summary and resets the watermark", async () => {
+  it("DELETE /conversations/:id/memory → 200 clears memory with a persistent boundary and invalidates pending summaries", async () => {
+    const [before] = await db.select().from(conversations).where(eq(conversations.id, convAId));
+    const storedMessages = await db.select().from(messages).where(eq(messages.conversationId, convAId));
     // Simulate an in-progress summariser watermark.
     await db
       .update(conversations)
@@ -394,6 +434,8 @@ describe("owner memory editing", () => {
       .from(conversations)
       .where(eq(conversations.id, convAId));
     expect(row.contextSummary).toBeNull();
+    expect(row.contextSummaryAfterMessageId).toBe(Math.max(0, ...storedMessages.map((m) => m.id)));
+    expect(row.contextSummaryRevision).toBe(before.contextSummaryRevision + 1);
     expect(row.contextSummaryMessageCount).toBeNull();
 
     const check = await request(app)

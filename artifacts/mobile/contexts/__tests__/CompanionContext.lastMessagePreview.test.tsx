@@ -30,6 +30,21 @@ jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock"),
 );
 
+jest.mock("expo-battery", () => ({
+  BatteryState: { CHARGING: 2, FULL: 3 },
+  getBatteryLevelAsync: jest.fn().mockResolvedValue(1),
+  getBatteryStateAsync: jest.fn().mockResolvedValue(0),
+  addBatteryLevelListener: jest.fn(() => ({ remove: jest.fn() })),
+  addBatteryStateListener: jest.fn(() => ({ remove: jest.fn() })),
+}));
+
+jest.mock("expo-sensors", () => ({
+  Accelerometer: {
+    addListener: jest.fn(() => ({ remove: jest.fn() })),
+    setUpdateInterval: jest.fn(),
+  },
+}));
+
 jest.mock("expo-audio", () => ({
   RecordingPresets: { HIGH_QUALITY: {}, LOW_QUALITY: {} },
   useAudioRecorder: () => ({
@@ -194,7 +209,7 @@ describe("lastMessagePreview", () => {
     expect(result.current.conversationId).toBe(chatA.id);
 
     // Start a send from chat A — it's in flight.
-    let sendPromise!: Promise<void>;
+    let sendPromise!: Promise<boolean>;
     act(() => {
       sendPromise = result.current.sendText("hello");
     });

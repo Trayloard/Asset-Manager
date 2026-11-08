@@ -10,8 +10,11 @@ export interface Conversation {
   id: number;
   title: string;
   createdAt: Date;
+  /**
+     * Preview of the latest message, or null for an empty conversation.
+     * @nullable
+     */
+  lastMessageText: string | null;
   /** @nullable */
-  lastMessageText?: string | null;
-  /** @nullable */
-  lastMessageAt?: Date | null;
+  lastMessageAt: Date | null;
 }

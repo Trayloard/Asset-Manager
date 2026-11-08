@@ -12,6 +12,10 @@ import {
 
 import { InnerSelfSheet } from "../InnerSelfSheet";
 
+jest.mock("expo-router", () => ({
+  useRouter: jest.fn(() => ({ push: jest.fn() })),
+}));
+
 /**
  * Tests for the Memory tab's edit / forget flows.
  *

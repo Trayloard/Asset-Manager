@@ -1,27 +1,25 @@
 {
   "expo": {
-    "name": "Empiri",
-    "slug": "mobile",
+    "name": "empiri",
+    "slug": "empiri",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "mobile",
+    "scheme": "empiri",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/images/icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0A0A0C"
-    },
     "ios": {
       "supportsTablet": false,
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Empiri uses your microphone so you can talk to your companion by voice.",
         "NSMotionUsageDescription": "With Senses turned on, Empiri notices gentle motion like a playful shake while the app is open."
-      }
+      },
+      "bundleIdentifier": "com.empiri.app"
     },
     "android": {
-      "permissions": ["RECORD_AUDIO"]
+      "permissions": [
+        "RECORD_AUDIO"
+      ],
+      "package": "com.empiri.app"
     },
     "web": {
       "favicon": "./assets/images/icon.png"
@@ -31,6 +29,15 @@
         "expo-router",
         {
           "origin": "https://replit.com/"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/icon.png",
+          "imageWidth": 100,
+          "resizeMode": "contain",
+          "backgroundColor": "#0A0A0C"
         }
       ],
       "expo-font",
@@ -52,7 +59,9 @@
         {
           "motionPermission": "With Senses turned on, Empiri notices gentle motion like a playful shake while the app is open."
         }
-      ]
+      ],
+      "expo-secure-store",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,

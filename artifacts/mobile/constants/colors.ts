@@ -60,8 +60,6 @@ const colors = {
     userBubble: ["#5B8CFF", "#A855F7"] as const,
     userBubbleBorder: "rgba(124,58,237,0.0)",
     userBubbleText: "#FFFFFF",
-    islandBg: "#F8F7FF",
-    islandGlow: "#A855F7",
   },
 
   dark: {
@@ -104,8 +102,6 @@ const colors = {
     userBubble: ["rgba(91,140,255,0.30)", "rgba(168,85,247,0.30)"] as const,
     userBubbleBorder: "rgba(140,170,255,0.45)",
     userBubbleText: "#FFFFFF",
-    islandBg: "#F8F7FF",
-    islandGlow: "#A855F7",
   },
 
   // Border radius (in px) for cards, buttons, inputs.

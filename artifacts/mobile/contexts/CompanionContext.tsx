@@ -82,6 +82,12 @@ export type CompanionStatus =
   | "transcribing"
   | "speaking";
 
+type MicrophoneInterruptionReason = "app-state" | "native-audio";
+type MicrophoneInterruption = {
+  mode: "recording" | "call";
+  reason: MicrophoneInterruptionReason;
+};
+
 /**
  * A user turn whose reply failed. We keep the original message id (the
  * optimistic bubble still on screen) and its text so the user can retry
@@ -125,6 +131,7 @@ interface CompanionContextValue {
   error: string | null;
   failedTurn: FailedTurn | null;
   isRecording: boolean;
+  microphoneInterruption: MicrophoneInterruption | null;
   /** True while an audio-call mode loop is running. */
   isCallActive: boolean;
   /**
@@ -134,7 +141,7 @@ interface CompanionContextValue {
    * trigger React re-renders, keeping the UI thread light.
    */
   micVolumeRef: React.MutableRefObject<number>;
-  sendText: (content: string) => Promise<void>;
+  sendText: (content: string) => Promise<boolean>;
   retryMessage: () => Promise<void>;
   startListening: () => Promise<void>;
   stopListening: () => Promise<boolean>;
@@ -253,6 +260,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const [failedTurn, setFailedTurn] = useState<FailedTurn | null>(null);
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [isCallActive, setIsCallActive] = useState<boolean>(false);
+  const [microphoneInterruption, setMicrophoneInterruption] =
+    useState<MicrophoneInterruption | null>(null);
   const [settings, setSettings] = useState<CompanionSettings | null>(null);
   const [sensesEnabled, setSensesEnabled] = useState<boolean>(false);
   const [pendingReflection, setPendingReflection] = useState<{
@@ -273,6 +282,21 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   // always see the current value without depending on the state directly.
   const isRecordingRef = useRef<boolean>(false);
   const isCallActiveRef = useRef<boolean>(false);
+  const recordingRequestedRef = useRef<boolean>(false);
+  const recordingRequestGenerationRef = useRef<number | null>(null);
+  const nativeRecordingObservedRef = useRef<boolean>(false);
+  const interruptAudioRef = useRef<
+    (reason: MicrophoneInterruptionReason) => void
+  >(() => {});
+  const callGenerationRef = useRef(0);
+  const callMessageRequestRef = useRef<{
+    generation: number;
+    controller: AbortController;
+  } | null>(null);
+  const callSpeechCancelRef = useRef<(() => void) | null>(null);
+  // Serialize native startup/cleanup: an obsolete prepare must finish and
+  // release the shared recorder before a replacement call can use it.
+  const recorderStartupRef = useRef<Promise<void>>(Promise.resolve());
   // When a call is active, Empiri must always speak its reply regardless of
   // the user's voiceEnabled toggle. This ref is read inside deliver().
   const callForcesVoiceRef = useRef<boolean>(false);
@@ -347,30 +371,66 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     }
   }, [applyMoodState]);
 
-  const playSpeech = useCallback(async (text: string) => {
+  const playSpeech = useCallback(async (text: string, callGeneration?: number) => {
+    const isCurrentCall = () =>
+      callGeneration == null || callGeneration === callGenerationRef.current;
+    let path: string | null = null;
     try {
       const { audio } = await synthesizeSpeech({ text });
-      const path = `${FileSystem.cacheDirectory}empiri-${Date.now()}.mp3`;
+      if (!isCurrentCall()) return;
+      path = `${FileSystem.cacheDirectory}empiri-${Date.now()}.mp3`;
       await FileSystem.writeAsStringAsync(path, audio, {
         encoding: FileSystem.EncodingType.Base64,
       });
+      if (!isCurrentCall()) {
+        FileSystem.deleteAsync(path, { idempotent: true }).catch(() => {});
+        return;
+      }
       await setAudioModeAsync({
         allowsRecording: false,
         playsInSilentMode: true,
       });
+      if (!isCurrentCall()) {
+        FileSystem.deleteAsync(path, { idempotent: true }).catch(() => {});
+        return;
+      }
       const player = createAudioPlayer({ uri: path });
-      player.play();
       await new Promise<void>((resolve) => {
-        const sub = player.addListener("playbackStatusUpdate", (s) => {
+        let finished = false;
+        let sub: ReturnType<typeof player.addListener> | null = null;
+        const finish = () => {
+          if (finished) return;
+          finished = true;
+          sub?.remove();
+          player.remove();
+          FileSystem.deleteAsync(path!, { idempotent: true }).catch(() => {});
+          if (callSpeechCancelRef.current === cancelPlayback) {
+            callSpeechCancelRef.current = null;
+          }
+          resolve();
+        };
+        const cancelPlayback = () => {
+          try {
+            player.pause?.();
+          } catch {
+            // Playback may already be finished or unavailable on web.
+          }
+          finish();
+        };
+        sub = player.addListener("playbackStatusUpdate", (s) => {
           if (s.didJustFinish) {
-            sub.remove();
-            player.remove();
-            FileSystem.deleteAsync(path, { idempotent: true }).catch(() => {});
-            resolve();
+            finish();
           }
         });
+        if (callGeneration != null) {
+          callSpeechCancelRef.current = cancelPlayback;
+        }
+        player.play();
       });
     } catch {
+      if (path) {
+        FileSystem.deleteAsync(path, { idempotent: true }).catch(() => {});
+      }
       // Speech is best-effort; the text reply is already shown.
     }
   }, []);
@@ -711,7 +771,19 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   // back to the regular REST endpoint. Either path routes errors through the
   // same catch block which sets mood → "sad" and marks the turn as retryable.
   const deliver = useCallback(
-    async (content: string, optimistic: Message, id: number) => {
+    async (
+      content: string,
+      optimistic: Message,
+      id: number,
+      callGeneration?: number,
+    ): Promise<boolean> => {
+      const callRequest =
+        callGeneration == null
+          ? null
+          : { generation: callGeneration, controller: new AbortController() };
+      if (callRequest) callMessageRequestRef.current = callRequest;
+      const isCurrentCall = () =>
+        callGeneration == null || callGeneration === callGenerationRef.current;
       setError(null);
       clearFailedTurn();
       setStatus("thinking");
@@ -727,6 +799,12 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
             `/conversations/${id}/messages/stream`,
             {
               method: "POST",
+              ...(callRequest
+                ? {
+                    signal: callRequest.controller.signal,
+                    headers: { "X-Empiri-Call-Request": "true" },
+                  }
+                : {}),
               body: JSON.stringify({
                 content,
                 ...(percepts ? { percepts } : {}),
@@ -799,10 +877,16 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         } else {
           // ── React Native fallback ───────────────────────────────────────────
           // ReadableStream is not exposed in RN; use the regular REST endpoint.
-          const result = await sendMessage(id, {
+          const messageInput = {
             content,
             ...(percepts ? { percepts } : {}),
-          });
+          };
+          const result = callRequest
+            ? await sendMessage(id, messageInput, {
+                signal: callRequest.controller.signal,
+                headers: { "X-Empiri-Call-Request": "true" },
+              })
+            : await sendMessage(id, messageInput);
           userMsg = result.userMessage;
           assistantMsg = result.assistantMessage;
         }
@@ -814,57 +898,77 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
           throw new Error("empty assistant reply");
         }
 
-        // The user may have switched to another conversation (or started a
-        // new chat) while this request was in flight. The reply is already
-        // persisted server-side, but it must never be written into the chat
-        // that is now on screen — that would mix messages across
-        // conversations. The exchange still counts as real contact, though.
-        if (conversationIdRef.current !== id) {
-          touchInteraction();
-          return;
+        const isVisibleConversation = conversationIdRef.current === id;
+
+        // The request may have reached the server before hangup. Reconcile its
+        // persisted pair as text when the original conversation is still
+        // visible, but never speak a result from an ended/replaced call.
+        if (isVisibleConversation) {
+          setMessages((prev) => {
+            const byId = new Map<number, Message>();
+            for (const message of prev) {
+              if (message.id !== optimistic.id) byId.set(message.id, message);
+            }
+            if (!byId.has(userMsg.id)) byId.set(userMsg.id, userMsg);
+            if (!byId.has(assistantMsg.id)) byId.set(assistantMsg.id, assistantMsg);
+            return [...byId.values()].sort(
+              (left, right) =>
+                left.createdAt.localeCompare(right.createdAt) ||
+                left.id - right.id,
+            );
+          });
         }
 
-        setMessages((prev) => [
-          ...prev.filter((m) => m.id !== optimistic.id),
-          userMsg,
-          assistantMsg,
-        ]);
-
-        // Keep the switcher preview in sync without a full refresh.
-        setChats((prev) =>
-          prev.map((c) =>
-            c.id === id
-              ? {
-                  ...c,
-                  lastMessageText: assistantMsg.content,
-                  lastMessageAt: assistantMsg.createdAt,
-                }
-              : c,
-          ),
-        );
+        // Keep a voice reply's switcher preview current even if the user has
+        // switched away. The original history is fetched when reopened; never
+        // place its response in the replacement conversation's messages.
+        // Ordinary text sends keep their existing stale-preview behavior.
+        if (isVisibleConversation || callGeneration != null) {
+          setChats((prev) =>
+            prev.map((c) =>
+              c.id === id &&
+              (c.lastMessageAt == null ||
+                assistantMsg.createdAt >= c.lastMessageAt)
+                ? {
+                    ...c,
+                    lastMessageText: assistantMsg.content,
+                    lastMessageAt: assistantMsg.createdAt,
+                  }
+                : c,
+            ),
+          );
+        }
 
         // A real exchange happened — the companion perks up.
         touchInteraction();
 
+        if (!isCurrentCall()) return false;
+        if (!isVisibleConversation) return true;
+
         if (voiceEnabled || callForcesVoiceRef.current) {
           setStatus("speaking");
-          await playSpeech(assistantMsg.content);
+          await playSpeech(assistantMsg.content, callGeneration);
         }
+        return true;
       } catch {
         // Same stale-conversation guard: a failure from a chat the user has
         // already left must not surface an error banner, sad mood, or a
         // retryable turn in the newly opened chat (the optimistic bubble it
         // would retry is no longer on screen).
-        if (conversationIdRef.current !== id) return;
+        if (conversationIdRef.current !== id || !isCurrentCall()) return false;
         setError("Empiri couldn't reply just now. Try again.");
         setMood((prev) => ({ ...prev, label: "sad" }));
         const failed: FailedTurn = { messageId: optimistic.id, content };
         failedTurnRef.current = failed;
         setFailedTurn(failed);
+        return false;
       } finally {
+        if (callRequest && callMessageRequestRef.current === callRequest) {
+          callMessageRequestRef.current = null;
+        }
         // openConversation/startNewChat already reset status for their new
         // chat; a stale request must not clobber whatever came after.
-        if (conversationIdRef.current === id) {
+        if (conversationIdRef.current === id && isCurrentCall()) {
           setStatus("idle");
         }
       }
@@ -872,11 +976,14 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     [voiceEnabled, playSpeech, touchInteraction, clearFailedTurn, drainPercepts],
   );
 
-  const sendText = useCallback(
-    async (raw: string) => {
+  const sendTextForCall = useCallback(
+    async (raw: string, callGeneration?: number): Promise<boolean> => {
       const content = raw.trim();
       const id = conversationIdRef.current;
-      if (!content || id == null) return;
+      if (!content || id == null) return false;
+      if (callGeneration != null && callGeneration !== callGenerationRef.current) {
+        return false;
+      }
 
       const optimistic: Message = {
         id: tempId(),
@@ -886,9 +993,15 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         createdAt: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, optimistic]);
-      await deliver(content, optimistic, id);
+      return deliver(content, optimistic, id, callGeneration);
     },
     [deliver],
+  );
+
+  // Keep ordinary text sends independent from a call's cancellation token.
+  const sendText = useCallback(
+    (raw: string) => sendTextForCall(raw),
+    [sendTextForCall],
   );
 
   // Re-send the last failed user turn without retyping. The optimistic bubble
@@ -910,17 +1023,35 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
 
   const startListening = useCallback(async () => {
     if (conversationIdRef.current == null) return;
+    if (recordingRequestedRef.current || isRecordingRef.current) return;
+    const generation = callGenerationRef.current;
+    const isCurrent = () => generation === callGenerationRef.current;
+    recordingRequestedRef.current = true;
+    recordingRequestGenerationRef.current = generation;
+    nativeRecordingObservedRef.current = false;
+    setMicrophoneInterruption(null);
+    const startup = recorderStartupRef.current.then(async () => {
+    if (!isCurrent()) return;
+    let configuredAudio = false;
+    let prepared = false;
     try {
       const permission = await AudioModule.requestRecordingPermissionsAsync();
+      if (!isCurrent()) return;
       if (!permission.granted) {
+        recordingRequestedRef.current = false;
+        recordingRequestGenerationRef.current = null;
         setError("Microphone access is needed to talk to Empiri.");
         return;
       }
+      configuredAudio = true;
       await setAudioModeAsync({
         allowsRecording: true,
         playsInSilentMode: true,
       });
+      if (!isCurrent()) return;
+      prepared = true;
       await recorder.prepareToRecordAsync();
+      if (!isCurrent()) return;
       recorder.record();
       setError(null);
       isRecordingRef.current = true;
@@ -928,11 +1059,22 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       setStatus("listening");
       // Poll metering every 120 ms and write to the ref that ChatInput reads.
       // recorder.getStatus() is synchronous and returns RecorderState which
-      // includes the dBFS metering value when isMeteringEnabled is true.
+      // includes both interruption state and dBFS metering when enabled.
       meterIntervalRef.current = setInterval(() => {
         if (!isRecordingRef.current) return;
         try {
           const s = recorder.getStatus();
+          // Prefer the explicit reset flag where available; Expo's iOS
+          // interruption handler can otherwise pause the recorder, reported as
+          // an isRecording true -> false transition. Ignore an initial false.
+          if (
+            s.mediaServicesDidReset ||
+            (nativeRecordingObservedRef.current && !s.isRecording)
+          ) {
+            interruptAudioRef.current("native-audio");
+            return;
+          }
+          if (s.isRecording) nativeRecordingObservedRef.current = true;
           const db = typeof s.metering === "number" ? s.metering : -160;
           // Map −60 dB (quiet) … −10 dB (loud) onto 0…1.
           micVolumeRef.current = Math.max(0, Math.min(1, (db + 60) / 50));
@@ -942,23 +1084,53 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         }
       }, 120);
     } catch {
+      if (!isCurrent()) return;
+      if (recordingRequestGenerationRef.current === generation) {
+        recordingRequestedRef.current = false;
+        recordingRequestGenerationRef.current = null;
+      }
       setError("Couldn't start recording. Try again.");
       isRecordingRef.current = false;
+      nativeRecordingObservedRef.current = false;
       setIsRecording(false);
       setStatus("idle");
       if (meterIntervalRef.current != null) {
         clearInterval(meterIntervalRef.current);
         meterIntervalRef.current = null;
       }
+    } finally {
+      if (!isCurrent()) {
+        if (recordingRequestGenerationRef.current === generation) {
+          recordingRequestedRef.current = false;
+          recordingRequestGenerationRef.current = null;
+        }
+        if (configuredAudio) {
+          if (prepared) await recorder.stop().catch(() => {});
+          await setAudioModeAsync({
+            allowsRecording: false,
+            playsInSilentMode: true,
+          }).catch(() => {});
+        }
+      }
     }
+    });
+    recorderStartupRef.current = startup;
+    await startup;
   }, [recorder]);
 
   // Returns true when the round completed successfully (text sent), false when
-  // it failed (empty audio, transcription/network error). Callers that do not
+  // it failed (empty audio, transcription or delivery error). Callers that do not
   // need the result can safely ignore it; startCall uses it to count failures.
-  const stopListening = useCallback(async (): Promise<boolean> => {
+  const stopListening = useCallback(async (callGeneration?: number): Promise<boolean> => {
     if (!isRecordingRef.current) return false;
+    const generation = callGeneration ?? callGenerationRef.current;
+    const isCurrent = () => generation === callGenerationRef.current;
     isRecordingRef.current = false;
+    nativeRecordingObservedRef.current = false;
+    if (recordingRequestGenerationRef.current === generation) {
+      recordingRequestedRef.current = false;
+      recordingRequestGenerationRef.current = null;
+    }
     if (meterIntervalRef.current != null) {
       clearInterval(meterIntervalRef.current);
       meterIntervalRef.current = null;
@@ -968,11 +1140,19 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     setStatus("transcribing");
     let uri: string | null = null;
     try {
-      await recorder.stop();
-      // Restore playback-friendly audio mode so TTS replies come through the
-      // speaker even on iOS (recording mode routes audio to the earpiece).
-      setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
-      uri = recorder.uri ?? null;
+      const stopping = recorderStartupRef.current.then(async () => {
+        await recorder.stop();
+        // Keep the mode reset inside the hardware queue; it must never run
+        // after a replacement call has acquired the shared recorder.
+        await setAudioModeAsync({
+          allowsRecording: false,
+          playsInSilentMode: true,
+        }).catch(() => {});
+        uri = recorder.uri ?? null;
+      });
+      recorderStartupRef.current = stopping.catch(() => {});
+      await stopping;
+      if (!isCurrent()) return false;
       if (!uri) {
         setStatus("idle");
         return false;
@@ -981,6 +1161,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       // An empty file produces an invalid base64 payload that the server
       // cannot decode — bail early with a clear user-facing message.
       const fileInfo = await FileSystem.getInfoAsync(uri);
+      if (!isCurrent()) return false;
       if (!fileInfo.exists || ("size" in fileInfo && fileInfo.size === 0)) {
         setError("Recording was empty — hold the button and speak.");
         setStatus("idle");
@@ -989,20 +1170,22 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       const base64 = await FileSystem.readAsStringAsync(uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
+      if (!isCurrent()) return false;
       if (!base64 || base64.length < 100) {
         setError("Recording was too short — try holding the button longer.");
         setStatus("idle");
         return false;
       }
       const { text } = await transcribeAudio({ audio: base64, format: "m4a" });
+      if (!isCurrent()) return false;
       if (!text.trim()) {
         setError("I didn't catch that. Try again.");
         setStatus("idle");
         return false;
       }
-      await sendText(text);
-      return true;
+      return await sendTextForCall(text, generation);
     } catch (err) {
+      if (!isCurrent()) return false;
       setError(classifyVoiceError(err));
       setStatus("idle");
       return false;
@@ -1013,7 +1196,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
       }
     }
-  }, [recorder, sendText]);
+  }, [recorder, sendTextForCall]);
 
   // ── Audio call mode ──────────────────────────────────────────────────────
   // Holding the mic button for 3 s launches a continuous listen → transcribe
@@ -1021,14 +1204,28 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   // breaks the loop immediately by unblocking the pending await.
 
   const endCall = useCallback(() => {
+    const endingGeneration = callGenerationRef.current;
+    ++callGenerationRef.current;
+    recordingRequestedRef.current = false;
+    recordingRequestGenerationRef.current = null;
+    nativeRecordingObservedRef.current = false;
+    const pendingMessageRequest = callMessageRequestRef.current;
+    if (pendingMessageRequest?.generation === endingGeneration) {
+      callMessageRequestRef.current = null;
+      pendingMessageRequest.controller.abort();
+    }
     isCallActiveRef.current = false;
     callForcesVoiceRef.current = false;
+    callSpeechCancelRef.current?.();
+    callSpeechCancelRef.current = null;
     if (meterIntervalRef.current != null) {
       clearInterval(meterIntervalRef.current);
       meterIntervalRef.current = null;
     }
     micVolumeRef.current = 0;
     setIsCallActive(false);
+    setStatus("idle");
+    setMicrophoneInterruption(null);
     if (callAutoStopRef.current != null) {
       clearTimeout(callAutoStopRef.current);
       callAutoStopRef.current = null;
@@ -1039,20 +1236,154 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     }
     if (isRecordingRef.current) {
       isRecordingRef.current = false;
+      nativeRecordingObservedRef.current = false;
       setIsRecording(false);
       setStatus("idle");
-      recorder.stop().catch(() => {}).finally(() => {
-        setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+      const stopping = recorderStartupRef.current.then(async () => {
+        await recorder.stop().catch(() => {});
+        const uri = recorder.uri ?? null;
+        await setAudioModeAsync({
+          allowsRecording: false,
+          playsInSilentMode: true,
+        }).catch(() => {});
+        if (uri) {
+          await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+        }
       });
+      recorderStartupRef.current = stopping.catch(() => {});
     } else {
       // Even if not recording, restore playback mode in case it was partially set.
-      setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+      const restoringAudio = recorderStartupRef.current
+        .catch(() => {})
+        .then(async () => {
+          await setAudioModeAsync({
+            allowsRecording: false,
+            playsInSilentMode: true,
+          }).catch(() => {});
+        });
+      recorderStartupRef.current = restoringAudio.catch(() => {});
     }
   }, [recorder]);
 
+  const interruptAudioCapture = useCallback(
+    (reason: MicrophoneInterruptionReason) => {
+      const mode = isCallActiveRef.current
+        ? "call"
+        : recordingRequestedRef.current || isRecordingRef.current
+          ? "recording"
+          : null;
+      if (!mode) return;
+
+      if (mode === "call") {
+        // endCall invalidates pending STT/TTS work, resolves the pending round,
+        // clears its timer, and serializes recorder cleanup before any restart.
+        endCall();
+      } else {
+        ++callGenerationRef.current;
+        recordingRequestedRef.current = false;
+        recordingRequestGenerationRef.current = null;
+        isRecordingRef.current = false;
+        nativeRecordingObservedRef.current = false;
+        if (meterIntervalRef.current != null) {
+          clearInterval(meterIntervalRef.current);
+          meterIntervalRef.current = null;
+        }
+        micVolumeRef.current = 0;
+        setIsRecording(false);
+        setStatus("idle");
+
+        const stopping = recorderStartupRef.current.then(async () => {
+          await recorder.stop().catch(() => {});
+          const uri = recorder.uri ?? null;
+          await setAudioModeAsync({
+            allowsRecording: false,
+            playsInSilentMode: true,
+          }).catch(() => {});
+          if (uri) {
+            await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+          }
+        });
+        recorderStartupRef.current = stopping.catch(() => {});
+      }
+
+      setError(null);
+      setMicrophoneInterruption({ mode, reason });
+    },
+    [endCall, recorder],
+  );
+  interruptAudioRef.current = interruptAudioCapture;
+
+  // Do not resume automatically when the app becomes active again. System
+  // interruptions can invalidate the native recorder, so the user explicitly
+  // starts a fresh recording from the paused state.
+  useEffect(() => {
+    const appStateSubscription = AppState.addEventListener(
+      "change",
+      (nextState) => {
+        if (nextState !== "active") {
+          interruptAudioRef.current("app-state");
+        }
+      },
+    );
+    return () => appStateSubscription?.remove();
+  }, []);
+
+  // Release native audio resources when the provider leaves the tree. This
+  // intentionally updates refs only: React state must not be set during
+  // unmount. Bumping the generation also invalidates any permission, audio-mode
+  // or recorder-preparation promise that has not completed yet.
+  useEffect(() => {
+    return () => {
+      ++callGenerationRef.current;
+      callMessageRequestRef.current?.controller.abort();
+      callMessageRequestRef.current = null;
+      isCallActiveRef.current = false;
+      callForcesVoiceRef.current = false;
+      recordingRequestedRef.current = false;
+      recordingRequestGenerationRef.current = null;
+      nativeRecordingObservedRef.current = false;
+      callSpeechCancelRef.current?.();
+      callSpeechCancelRef.current = null;
+
+      if (meterIntervalRef.current != null) {
+        clearInterval(meterIntervalRef.current);
+        meterIntervalRef.current = null;
+      }
+      micVolumeRef.current = 0;
+
+      if (callAutoStopRef.current != null) {
+        clearTimeout(callAutoStopRef.current);
+        callAutoStopRef.current = null;
+      }
+      callRoundResolveRef.current?.();
+      callRoundResolveRef.current = null;
+
+      const wasRecording = isRecordingRef.current;
+      isRecordingRef.current = false;
+      recorderStartupRef.current = recorderStartupRef.current
+        .then(async () => {
+          if (wasRecording) await recorder.stop().catch(() => {});
+          await setAudioModeAsync({
+            allowsRecording: false,
+            playsInSilentMode: true,
+          }).catch(() => {});
+        })
+        .catch(() => {});
+    };
+  }, [recorder]);
+
   const startCall = useCallback(async () => {
-    if (isCallActiveRef.current) return;
+    if (
+      isCallActiveRef.current ||
+      recordingRequestedRef.current ||
+      isRecordingRef.current
+    ) {
+      return;
+    }
     if (conversationIdRef.current == null) return;
+    const generation = ++callGenerationRef.current;
+    const isCurrentCall = () =>
+      generation === callGenerationRef.current && isCallActiveRef.current;
 
     const CALL_ROUND_MS = 20_000;
     // End the call automatically after this many consecutive failed rounds so
@@ -1061,6 +1392,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
 
     isCallActiveRef.current = true;
     callForcesVoiceRef.current = true;
+    setMicrophoneInterruption(null);
     // setIsCallActive(true) is deferred until startListening confirms that
     // recording actually started. If permission is denied or a hardware error
     // fires, we exit without ever showing the "call active" indicator.
@@ -1068,8 +1400,9 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     let consecutiveErrors = 0;
 
     try {
-      while (isCallActiveRef.current) {
+      while (isCurrentCall()) {
         await startListening();
+        if (!isCurrentCall()) break;
 
         if (!isRecordingRef.current) {
           // startListening failed (permissions denied, hardware error, etc.)
@@ -1089,14 +1422,15 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
             resolve();
           }, CALL_ROUND_MS);
         });
+        if (!isCurrentCall()) break;
         callRoundResolveRef.current = null;
         callAutoStopRef.current = null;
 
-        if (!isCallActiveRef.current) break;
+        if (!isCurrentCall()) break;
 
         // Transcribe → send → speak. stopListening returns true on success,
         // false on any error (it also surfaces the error via setError).
-        const roundOk = await stopListening();
+        const roundOk = await stopListening(generation);
 
         if (!roundOk) {
           consecutiveErrors += 1;
@@ -1105,12 +1439,14 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
           consecutiveErrors = 0;
         }
 
-        if (!isCallActiveRef.current) break;
+        if (!isCurrentCall()) break;
       }
     } finally {
-      isCallActiveRef.current = false;
-      callForcesVoiceRef.current = false;
-      setIsCallActive(false);
+      if (generation === callGenerationRef.current) {
+        isCallActiveRef.current = false;
+        callForcesVoiceRef.current = false;
+        setIsCallActive(false);
+      }
     }
   }, [startListening, stopListening]);
 
@@ -1464,6 +1800,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         error,
         failedTurn,
         isRecording,
+        microphoneInterruption,
         isCallActive,
         micVolumeRef,
         sendText,

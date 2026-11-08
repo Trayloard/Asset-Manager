@@ -96,6 +96,17 @@ export function evolve(
   params: NeuroParams = NEURO_PARAMS,
   now: number = Date.now(),
 ): InnerSelf {
+  const folded = foldInteraction(self, signal, params, now);
+  return { ...folded, interactions: folded.interactions + 1 };
+}
+
+/** Shared fold; callers decide whether this event counts as an interaction. */
+function foldInteraction(
+  self: InnerSelf,
+  signal: InteractionSignal,
+  params: NeuroParams,
+  now: number,
+): InnerSelf {
   const decayed = project(self, params, now);
   const blocks: Record<string, BlockEnvelope> = { ...decayed.blocks };
   for (const block of enabledBlocks(params)) {
@@ -109,7 +120,7 @@ export function evolve(
     });
     blocks[block.id] = { version: block.version, lastUpdatedAt: now, data };
   }
-  return { ...decayed, blocks, interactions: decayed.interactions + 1 };
+  return { ...decayed, blocks };
 }
 
 /**
@@ -142,21 +153,8 @@ export function perceive(
     percepts: clean,
   };
 
-  const decayed = project(self, params, now);
-  const blocks: Record<string, BlockEnvelope> = { ...decayed.blocks };
-  for (const block of enabledBlocks(params)) {
-    const env = blocks[block.id];
-    if (!env) continue;
-    const weight = params.blockWeights[block.id] ?? 1;
-    const data = block.applyInteraction(env.data, signal, params, {
-      now,
-      elapsedMs: 0,
-      weight,
-    });
-    blocks[block.id] = { version: block.version, lastUpdatedAt: now, data };
-  }
   // Deliberately NOT incrementing `interactions`.
-  return { ...decayed, blocks };
+  return foldInteraction(self, signal, params, now);
 }
 
 /**

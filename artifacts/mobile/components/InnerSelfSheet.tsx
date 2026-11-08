@@ -2022,7 +2022,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   glow: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   nodeInner: {
     flexDirection: "row",
@@ -2060,7 +2060,7 @@ const styles = StyleSheet.create({
     borderRadius: 2,
   },
   detailBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   detailCard: {
     position: "absolute",

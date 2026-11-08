@@ -142,4 +142,20 @@ describe("ChatInput in-call state", () => {
       "Call in progress…",
     );
   });
+
+  it("explains how to restart after the app interrupted microphone access", () => {
+    const { getByTestId } = render(
+      <ChatInput
+        {...defaultProps}
+        microphoneInterrupted
+        interruptionReason="app-state"
+      />,
+    );
+    expect(getByTestId("microphone-interrupted-message").props.children).toBe(
+      "Microphone paused when Empiri moved to the background. The unfinished recording was discarded; tap the mic to start again.",
+    );
+    expect(getByTestId("mic-button").props.accessibilityLabel).toBe(
+      "Resume microphone",
+    );
+  });
 });

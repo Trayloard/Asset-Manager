@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import { asc, eq, sql } from "drizzle-orm";
 import {
   db,
@@ -36,15 +36,60 @@ import {
 } from "../lib/messageSignal";
 import { maybeReflect, primeReflection, takeCachedReflection } from "../lib/reflection";
 import { getSelfHistory, maybeSnapshotSelf } from "../lib/selfSnapshots";
-import {
-  buildContextMessages,
-  getIncrementalMessagesForSummarisation,
-  nextSummarizedCount,
-  shouldRefreshSummary,
-} from "../lib/contextWindow";
+import { buildContextMessages } from "../lib/contextWindow";
+import { refreshConversationSummary } from "../lib/conversationSummary";
 import { buildToneAddendum } from "../lib/companionPrompt";
 
 const router: IRouter = Router();
+
+type CallRequestCancellation = {
+  signal: AbortSignal;
+};
+
+/**
+ * Only call-scoped sends opt into disconnect cancellation. Typed messages keep
+ * their existing request lifecycle even if the client changes how it waits.
+ */
+function trackCallRequestCancellation(
+  req: Request,
+  res: Response,
+): CallRequestCancellation | null {
+  if (req.get("x-empiri-call-request") !== "true") return null;
+
+  const controller = new AbortController();
+  const dispose = () => {
+    res.off("close", onClose);
+    res.off("finish", dispose);
+  };
+  const onClose = () => {
+    if (!res.writableFinished) controller.abort();
+    dispose();
+  };
+
+  res.once("close", onClose);
+  res.once("finish", dispose);
+  if (req.aborted || (res.destroyed && !res.writableFinished)) {
+    controller.abort();
+    dispose();
+  }
+  return { signal: controller.signal };
+}
+
+/** Same correlated preview fields for list and detail; preserve query semantics. */
+function lastMessageFields() {
+  return {
+    lastMessageText: sql<string | null>`(
+      SELECT content FROM messages
+      WHERE conversation_id = ${conversations.id}
+      ORDER BY created_at DESC LIMIT 1
+    )`,
+    lastMessageAt: sql<string | null>`(
+      SELECT created_at FROM messages
+      WHERE conversation_id = ${conversations.id}
+      ORDER BY created_at DESC LIMIT 1
+    )`,
+  };
+}
 
 /**
  * Strictly parse a conversation ID from a URL param. Accepts only a plain
@@ -202,16 +247,7 @@ router.get("/conversations", async (req, res) => {
       id: conversations.id,
       title: conversations.title,
       createdAt: conversations.createdAt,
-      lastMessageText: sql<string | null>`(
-        SELECT content FROM messages
-        WHERE conversation_id = ${conversations.id}
-        ORDER BY created_at DESC LIMIT 1
-      )`,
-      lastMessageAt: sql<string | null>`(
-        SELECT created_at FROM messages
-        WHERE conversation_id = ${conversations.id}
-        ORDER BY created_at DESC LIMIT 1
-      )`,
+      ...lastMessageFields(),
     })
     .from(conversations)
     .where(eq(conversations.ownerId, req.user.id))
@@ -270,16 +306,7 @@ router.get("/conversations/:id", async (req, res) => {
 
   const [row] = await db
     .select({
-      lastMessageText: sql<string | null>`(
-        SELECT content FROM messages
-        WHERE conversation_id = ${conversations.id}
-        ORDER BY created_at DESC LIMIT 1
-      )`,
-      lastMessageAt: sql<string | null>`(
-        SELECT created_at FROM messages
-        WHERE conversation_id = ${conversations.id}
-        ORDER BY created_at DESC LIMIT 1
-      )`,
+      ...lastMessageFields(),
     })
     .from(conversations)
     .where(eq(conversations.id, conversation.id));
@@ -354,8 +381,10 @@ router.get("/conversations/:id/messages", async (req, res) => {
 
 // Send a text message and get the companion's reply
 router.post("/conversations/:id/messages", async (req, res) => {
+  const cancellation = trackCallRequestCancellation(req, res);
   const conversation = await requireOwnedConversation(req, res);
   if (!conversation) return;
+  if (cancellation?.signal.aborted) return;
 
   const id = conversation.id;
 
@@ -375,63 +404,32 @@ router.post("/conversations/:id/messages", async (req, res) => {
     .insert(messages)
     .values({ conversationId: id, role: "user", content })
     .returning();
+  if (cancellation?.signal.aborted) return;
 
   // Build the chat history for the model.
   const history = await db
     .select()
     .from(messages)
     .where(eq(messages.conversationId, id))
-    .orderBy(asc(messages.createdAt));
+    .orderBy(asc(messages.createdAt), asc(messages.id));
+  if (cancellation?.signal.aborted) return;
 
-  // Incrementally refresh the rolling context summary when new messages have
-  // slid past the window boundary since the last watermark.  The summariser
-  // only receives the bounded delta (not the full overflow) so cost stays
-  // constant per refresh regardless of conversation length.  Best-effort: a
-  // failed refresh never blocks the reply.
-  let contextSummary = conversation.contextSummary ?? null;
-  const lastSummarizedCount = conversation.contextSummaryMessageCount ?? null;
-  if (shouldRefreshSummary(history.length, lastSummarizedCount)) {
-    try {
-      const delta = getIncrementalMessagesForSummarisation(history, lastSummarizedCount);
-      const deltaText = delta
-        .map((m) => `${m.role === "assistant" ? "Empiri" : "User"}: ${m.content}`)
-        .join("\n");
-
-      const systemInstruction = contextSummary
-        ? `You are a memory assistant. Update the existing summary below by incorporating the new messages that follow. Keep the result to 100–150 words. Write in third person, e.g. "The user mentioned…".\n\nExisting summary:\n${contextSummary}`
-        : `You are a memory assistant. Summarise the following conversation excerpt into a concise paragraph (100–150 words) covering the main topics discussed, any personal details the user shared, and the overall emotional tone. Write in third person, e.g. "The user mentioned…".`;
-
-      const summaryCompletion = await openai.chat.completions.create({
-        model: "gpt-5-mini",
-        max_completion_tokens: 512,
-        messages: [
-          { role: "system", content: systemInstruction },
-          { role: "user", content: deltaText },
-        ],
-      });
-      const newSummary = summaryCompletion.choices[0]?.message?.content?.trim() ?? null;
-      if (newSummary) {
-        contextSummary = newSummary;
-        // Advance the watermark only as far as we actually processed (delta.length),
-        // not all the way to the window start.  If the gap was larger than one batch,
-        // shouldRefreshSummary will still fire on the next turn and continue progress.
-        const newWatermark = nextSummarizedCount(lastSummarizedCount, delta.length);
-        await db
-          .update(conversations)
-          .set({ contextSummary: newSummary, contextSummaryMessageCount: newWatermark })
-          .where(eq(conversations.id, id));
-      }
-    } catch (err) {
-      req.log.error({ err }, "Failed to refresh context summary");
-    }
-  }
+  const contextSummary = await refreshConversationSummary(
+    id,
+    history,
+    req.log,
+    cancellation?.signal,
+  );
+  if (cancellation?.signal.aborted) return;
 
   // Compose the system prompt from this conversation's evolving inner self —
   // with any opt-in device percepts folded in first, so a fresh sensation can
   // colour this very reply — then layer the user's personalisation.
   const self = await loadOrCreateSelf(id);
+  if (cancellation?.signal.aborted) return;
   const felt = feelPercepts(id, self, parsed.data.percepts, req.log);
   const systemContent = await buildSystemPrompt(conversation.ownerId, felt);
+  if (cancellation?.signal.aborted) return;
   const windowedMessages = buildContextMessages(history, contextSummary);
   const chatMessages = [
     { role: "system" as const, content: systemContent },
@@ -440,23 +438,31 @@ router.post("/conversations/:id/messages", async (req, res) => {
 
   let reply = "";
   try {
-    const completion = await openai.chat.completions.create({
+    const completionRequest = {
       model: "gpt-5-mini",
       max_completion_tokens: 8192,
       messages: chatMessages,
-    });
+    };
+    const completion = cancellation
+      ? await openai.chat.completions.create(completionRequest, {
+          signal: cancellation.signal,
+        })
+      : await openai.chat.completions.create(completionRequest);
     reply = completion.choices[0]?.message?.content?.trim() ?? "";
   } catch (err) {
+    if (cancellation?.signal.aborted) return;
     req.log.error({ err }, "Companion reply generation failed");
     res.status(502).json({ error: "The companion couldn't reply right now." });
     return;
   }
 
+  if (cancellation?.signal.aborted) return;
   if (!reply) {
     res.status(502).json({ error: "The companion couldn't reply right now." });
     return;
   }
 
+  if (cancellation?.signal.aborted) return;
   const [assistantMessage] = await db
     .insert(messages)
     .values({ conversationId: id, role: "assistant", content: reply })
@@ -488,8 +494,10 @@ router.post("/conversations/:id/messages", async (req, res) => {
 // On success the stream ends with: data: {"done":true,"userMessage":{...},"assistantMessage":{...}}\n\n
 // On error the stream ends with:   data: {"error":"..."}\n\n
 router.post("/conversations/:id/messages/stream", async (req, res) => {
+  const cancellation = trackCallRequestCancellation(req, res);
   const conversation = await requireOwnedConversation(req, res);
   if (!conversation) return;
+  if (cancellation?.signal.aborted) return;
 
   const id = conversation.id;
 
@@ -508,49 +516,28 @@ router.post("/conversations/:id/messages/stream", async (req, res) => {
     .insert(messages)
     .values({ conversationId: id, role: "user", content })
     .returning();
+  if (cancellation?.signal.aborted) return;
 
   const history = await db
     .select()
     .from(messages)
     .where(eq(messages.conversationId, id))
-    .orderBy(asc(messages.createdAt));
+    .orderBy(asc(messages.createdAt), asc(messages.id));
+  if (cancellation?.signal.aborted) return;
 
-  let contextSummary = conversation.contextSummary ?? null;
-  const lastSummarizedCount = conversation.contextSummaryMessageCount ?? null;
-  if (shouldRefreshSummary(history.length, lastSummarizedCount)) {
-    try {
-      const delta = getIncrementalMessagesForSummarisation(history, lastSummarizedCount);
-      const deltaText = delta
-        .map((m) => `${m.role === "assistant" ? "Empiri" : "User"}: ${m.content}`)
-        .join("\n");
-      const systemInstruction = contextSummary
-        ? `You are a memory assistant. Update the existing summary below by incorporating the new messages that follow. Keep the result to 100–150 words. Write in third person, e.g. "The user mentioned…".\n\nExisting summary:\n${contextSummary}`
-        : `You are a memory assistant. Summarise the following conversation excerpt into a concise paragraph (100–150 words) covering the main topics discussed, any personal details the user shared, and the overall emotional tone. Write in third person, e.g. "The user mentioned…".`;
-      const summaryCompletion = await openai.chat.completions.create({
-        model: "gpt-5-mini",
-        max_completion_tokens: 512,
-        messages: [
-          { role: "system", content: systemInstruction },
-          { role: "user", content: deltaText },
-        ],
-      });
-      const newSummary = summaryCompletion.choices[0]?.message?.content?.trim() ?? null;
-      if (newSummary) {
-        contextSummary = newSummary;
-        const newWatermark = nextSummarizedCount(lastSummarizedCount, delta.length);
-        await db
-          .update(conversations)
-          .set({ contextSummary: newSummary, contextSummaryMessageCount: newWatermark })
-          .where(eq(conversations.id, id));
-      }
-    } catch (err) {
-      req.log.error({ err }, "Failed to refresh context summary (stream)");
-    }
-  }
+  const contextSummary = await refreshConversationSummary(
+    id,
+    history,
+    req.log,
+    cancellation?.signal,
+  );
+  if (cancellation?.signal.aborted) return;
 
   const self = await loadOrCreateSelf(id);
+  if (cancellation?.signal.aborted) return;
   const felt = feelPercepts(id, self, parsed.data.percepts, req.log);
   const systemContent = await buildSystemPrompt(conversation.ownerId, felt);
+  if (cancellation?.signal.aborted) return;
   const windowedMessages = buildContextMessages(history, contextSummary);
   const chatMessages = [
     { role: "system" as const, content: systemContent },
@@ -565,14 +552,20 @@ router.post("/conversations/:id/messages/stream", async (req, res) => {
   let reply = "";
 
   try {
-    const stream = await openai.chat.completions.create({
+    const completionRequest = {
       model: "gpt-5-mini",
       max_completion_tokens: 8192,
       messages: chatMessages,
-      stream: true,
-    });
+      stream: true as const,
+    };
+    const stream = cancellation
+      ? await openai.chat.completions.create(completionRequest, {
+          signal: cancellation.signal,
+        })
+      : await openai.chat.completions.create(completionRequest);
 
     for await (const chunk of stream) {
+      if (cancellation?.signal.aborted) return;
       const delta = chunk.choices[0]?.delta?.content ?? "";
       if (delta) {
         reply += delta;
@@ -580,18 +573,23 @@ router.post("/conversations/:id/messages/stream", async (req, res) => {
       }
     }
   } catch (err) {
+    if (cancellation?.signal.aborted) return;
     req.log.error({ err }, "Companion streaming reply failed");
+    if (res.destroyed) return;
     res.write(`data: ${JSON.stringify({ error: "AI stream error" })}\n\n`);
     res.end();
     return;
   }
 
+  if (cancellation?.signal.aborted) return;
   if (!reply) {
+    if (res.destroyed) return;
     res.write(`data: ${JSON.stringify({ error: "AI stream did not complete" })}\n\n`);
     res.end();
     return;
   }
 
+  if (cancellation?.signal.aborted) return;
   const [assistantMessage] = await db
     .insert(messages)
     .values({ conversationId: id, role: "assistant", content: reply })
@@ -813,7 +811,10 @@ router.patch("/conversations/:id/memory", async (req, res) => {
 
   const [updated] = await db
     .update(conversations)
-    .set({ contextSummary: summary })
+    .set({
+      contextSummary: summary,
+      contextSummaryRevision: sql`${conversations.contextSummaryRevision} + 1`,
+    })
     .where(eq(conversations.id, conversation.id))
     .returning();
 
@@ -834,38 +835,48 @@ router.delete("/conversations/:id/companion/facts/:key", async (req, res) => {
     return;
   }
 
-  const self = await loadOrCreateSelf(conversation.id);
-  const memoryEnvelope = self.blocks[MEMORY_BLOCK_ID];
-  if (memoryEnvelope) {
-    const data = memoryEnvelope.data as MemoryData;
-    const filtered = data.facts.filter((f) => f.key !== key);
-    if (filtered.length !== data.facts.length) {
-      await saveSelf(conversation.id, {
-        ...self,
-        blocks: {
-          ...self.blocks,
-          [MEMORY_BLOCK_ID]: {
-            ...memoryEnvelope,
-            data: { ...data, facts: filtered },
-          },
-        },
-      });
+  await enqueueConversationTask(conversation.id, async () => {
+    try {
+      const self = await loadOrCreateSelf(conversation.id);
+      const memoryEnvelope = self.blocks[MEMORY_BLOCK_ID];
+      if (memoryEnvelope) {
+        const data = memoryEnvelope.data as MemoryData;
+        const filtered = data.facts.filter((f) => f.key !== key);
+        if (filtered.length !== data.facts.length) {
+          await saveSelf(conversation.id, {
+            ...self,
+            blocks: {
+              ...self.blocks,
+              [MEMORY_BLOCK_ID]: {
+                ...memoryEnvelope,
+                data: { ...data, facts: filtered },
+              },
+            },
+          });
+        }
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      req.log.error({ error }, "Failed to forget fact");
+      if (!res.headersSent) res.status(500).json({ error: "Failed to forget fact" });
     }
-  }
-
-  res.json({ ok: true });
+  });
 });
 
-// Clear what the companion remembers: remove the stored summary and reset the
-// summariser watermark so the memory genuinely starts over (the next overflow
-// past the context window builds a fresh summary from that point on).
+// Atomically clear memory and exclude all currently stored messages from future
+// summaries. Revision invalidation also rejects model calls already in flight.
 router.delete("/conversations/:id/memory", async (req, res) => {
   const conversation = await requireOwnedConversation(req, res);
   if (!conversation) return;
 
   await db
     .update(conversations)
-    .set({ contextSummary: null, contextSummaryMessageCount: null })
+    .set({
+      contextSummary: null,
+      contextSummaryMessageCount: null,
+      contextSummaryAfterMessageId: sql`coalesce((select max(${messages.id}) from ${messages} where ${messages.conversationId} = ${conversation.id}), 0)`,
+      contextSummaryRevision: sql`${conversations.contextSummaryRevision} + 1`,
+    })
     .where(eq(conversations.id, conversation.id));
 
   res.json({ summary: null });

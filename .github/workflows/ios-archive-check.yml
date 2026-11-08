@@ -1,0 +1,84 @@
+name: iOS archive check
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "artifacts/mobile/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/ios-archive-check.yml"
+  pull_request:
+    paths:
+      - "artifacts/mobile/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/ios-archive-check.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-archive-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  archive:
+    name: Build and inspect iOS archive (no signing or upload)
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.1
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.13.0
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Show Apple build tools
+        run: |
+          xcode-select -p
+          xcodebuild -version
+          pod --version
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check Expo SDK dependency alignment
+        run: pnpm --filter @workspace/mobile exec expo install --check
+        env:
+          CI: "1"
+
+      - name: Generate the managed iOS project
+        run: pnpm --filter @workspace/mobile exec expo prebuild --platform ios --no-install
+        env:
+          CI: "1"
+
+      - name: Install iOS native dependencies
+        run: pod install --project-directory=artifacts/mobile/ios
+
+      - name: Archive for generic iOS device
+        run: |
+          xcodebuild \
+            -workspace artifacts/mobile/ios/empiri.xcworkspace \
+            -scheme empiri \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "$RUNNER_TEMP/Empiri.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            archive
+
+      - name: Verify archived app identity and permission descriptions
+        run: node artifacts/mobile/scripts/validate-ios-archive.js "$IOS_ARCHIVE_PATH"
+        env:
+          IOS_ARCHIVE_PATH: ${{ runner.temp }}/Empiri.xcarchive

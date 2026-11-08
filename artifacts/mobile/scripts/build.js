@@ -3,6 +3,7 @@ const path = require("path");
 const { spawn } = require("child_process");
 const { Readable } = require("stream");
 const { pipeline } = require("stream/promises");
+const { validateIosManifestFile } = require("./validate-ios-manifest");
 
 let metroProcess = null;
 
@@ -555,6 +556,10 @@ async function main() {
 
   console.log("Updating manifests and creating landing page...");
   updateManifests(manifests, timestamp, baseUrl, assetsByHash);
+  validateIosManifestFile(
+    path.join(projectRoot, "app.json"),
+    path.join(projectRoot, "static-build", "ios", "manifest.json"),
+  );
 
   console.log("Build complete! Deploy to:", baseUrl);
 

@@ -9,6 +9,10 @@ import {
 
 import { InnerSelfSheet } from "../InnerSelfSheet";
 
+jest.mock("expo-router", () => ({
+  useRouter: jest.fn(() => ({ push: jest.fn() })),
+}));
+
 /**
  * Layout-safety tests for curiosity-theme expansion on the mind map.
  *

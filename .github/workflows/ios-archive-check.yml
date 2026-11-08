@@ -64,7 +64,8 @@ jobs:
           CI: "1"
 
       - name: Install iOS native dependencies
-        run: pod install --project-directory=artifacts/mobile/ios
+        working-directory: artifacts/mobile/ios
+        run: pod install
 
       - name: Archive for generic iOS device
         run: |

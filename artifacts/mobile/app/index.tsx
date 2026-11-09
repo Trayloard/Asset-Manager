@@ -7,7 +7,6 @@ import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   Platform,
@@ -20,6 +19,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { confirmAction } from "@/lib/confirmAction";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import Animated, {
   Easing,
@@ -42,6 +42,7 @@ import { useCompanion } from "@/contexts/CompanionContext";
 import { useSmoothedWarmth } from "@/hooks/useAccentColor";
 import { useColors } from "@/hooks/useColors";
 import { useCompanionTraits } from "@/hooks/useCompanionTraits";
+import { useEndCallOnBlur } from "@/hooks/useEndCallOnBlur";
 import { accentForWarmth } from "@/lib/accent";
 import { useAuth } from "@/lib/auth";
 import type { MoodLabel } from "@/lib/mood";
@@ -141,6 +142,7 @@ export default function CompanionScreen() {
     error,
     failedTurn,
     isRecording,
+    microphoneInterruption,
     isCallActive,
     micVolumeRef,
     settings,
@@ -166,6 +168,7 @@ export default function CompanionScreen() {
     devRegressSelf,
     signOut,
   } = useCompanion();
+  useEndCallOnBlur(endCall);
 
   const { isAuthenticated, isLoading: authLoading, login } = useAuth();
 
@@ -267,6 +270,14 @@ export default function CompanionScreen() {
   const handleMic = () => {
     // In call mode the loop manages recording; tapping the mic does nothing.
     if (isCallActive) return;
+    if (microphoneInterruption?.mode === "call") {
+      startCall().catch(() => {});
+      return;
+    }
+    if (microphoneInterruption?.mode === "recording") {
+      startListening().catch(() => {});
+      return;
+    }
     if (isRecording) stopListening(); else startListening();
   };
 
@@ -303,20 +314,14 @@ export default function CompanionScreen() {
 
   const handleSignOut = () => {
     if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Alert.alert(
+    confirmAction(
       "Sign out?",
       "You'll need to sign in again to continue your conversation.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Sign Out",
-          style: "destructive",
-          onPress: () => {
-            setSettingsVisible(false);
-            signOut();
-          },
-        },
-      ],
+      "Sign Out",
+      () => {
+        setSettingsVisible(false);
+        signOut();
+      },
     );
   };
 
@@ -570,6 +575,8 @@ export default function CompanionScreen() {
             onMicLongPress={handleMicLongPress}
             isRecording={isRecording}
             isCallActive={isCallActive}
+            microphoneInterrupted={microphoneInterruption !== null}
+            interruptionReason={microphoneInterruption?.reason}
             busy={busy}
             warmth={smoothWarmth}
             micVolumeRef={micVolumeRef}

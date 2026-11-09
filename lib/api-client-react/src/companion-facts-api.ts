@@ -1,4 +1,4 @@
-import { customFetch } from "./custom-fetch";
+import { removeCompanionFact } from "./generated/api";
 
 /**
  * Delete a single learned fact from the companion's long-term memory.
@@ -9,8 +9,5 @@ export async function deleteCompanionFact(
   conversationId: number,
   key: string,
 ): Promise<void> {
-  await customFetch(
-    `/api/conversations/${conversationId}/companion/facts/${encodeURIComponent(key)}`,
-    { method: "DELETE" },
-  );
+  await removeCompanionFact(conversationId, encodeURIComponent(key));
 }

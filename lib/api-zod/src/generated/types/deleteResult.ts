@@ -6,7 +6,6 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface CreateConversationRequest {
-  /** @minLength 1 */
-  title?: string;
+export interface DeleteResult {
+  ok: boolean;
 }

@@ -139,6 +139,7 @@ jest.mock("expo-haptics", () => ({
 
 jest.mock("expo-router", () => ({
   useRouter: () => ({ push: jest.fn(), replace: jest.fn(), back: jest.fn() }),
+  useFocusEffect: jest.fn(),
 }));
 
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));

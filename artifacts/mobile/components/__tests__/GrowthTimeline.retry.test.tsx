@@ -22,6 +22,14 @@ jest.mock("@expo/vector-icons", () => ({
   Feather: () => null,
 }));
 
+jest.mock("expo-haptics", () => ({
+  selectionAsync: jest.fn().mockResolvedValue(undefined),
+  impactAsync: jest.fn().mockResolvedValue(undefined),
+  notificationAsync: jest.fn().mockResolvedValue(undefined),
+  ImpactFeedbackStyle: { Light: "light" },
+  NotificationFeedbackType: { Success: "success" },
+}));
+
 jest.mock("react-native-svg", () => {
   const { View } = require("react-native");
   return { __esModule: true, default: View, Path: View, Circle: View, Line: View };

@@ -7,6 +7,7 @@ import {
   Platform,
   Pressable,
   StyleSheet,
+  Text,
   TextInput,
   View,
 } from "react-native";
@@ -33,6 +34,9 @@ interface ChatInputProps {
   isRecording: boolean;
   /** True while an audio-call loop is active — disables the mic button's tap/hold. */
   isCallActive?: boolean;
+  /** True after the OS or app lifecycle interrupted the native microphone. */
+  microphoneInterrupted?: boolean;
+  interruptionReason?: "app-state" | "native-audio";
   busy: boolean;
   /**
    * Smoothed personality warmth (see `useSmoothedWarmth`). Gently tints the
@@ -54,6 +58,8 @@ export function ChatInput({
   onMicLongPress,
   isRecording,
   isCallActive = false,
+  microphoneInterrupted = false,
+  interruptionReason,
   busy,
   warmth = 0,
   micVolumeRef,
@@ -182,7 +188,9 @@ export function ChatInput({
         <TextInput
           style={[styles.input, { color: colors.foreground }]}
           placeholder={
-            isCallActive
+            microphoneInterrupted
+              ? "Microphone paused — tap the mic to restart…"
+              : isCallActive
               ? "Call in progress…"
               : isRecording
                 ? "Listening…"
@@ -254,6 +262,19 @@ export function ChatInput({
                 onLongPress={handleLongPress}
                 delayLongPress={HOLD_DURATION_MS}
                 disabled={(busy && !isRecording) || isCallActive}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  microphoneInterrupted
+                    ? "Resume microphone"
+                    : isRecording
+                      ? "Stop recording"
+                      : "Start recording"
+                }
+                accessibilityHint={
+                  microphoneInterrupted
+                    ? "Starts a fresh recording after the interruption."
+                    : undefined
+                }
                 style={({ pressed }) => [
                   styles.buttonWrap,
                   {
@@ -296,6 +317,17 @@ export function ChatInput({
           </View>
         )}
       </View>
+      {microphoneInterrupted ? (
+        <Text
+          accessibilityLiveRegion="polite"
+          style={[styles.interruptionHint, { color: colors.mutedForeground }]}
+          testID="microphone-interrupted-message"
+        >
+          {interruptionReason === "app-state"
+            ? "Microphone paused when Empiri moved to the background. The unfinished recording was discarded; tap the mic to start again."
+            : "Microphone paused during an audio interruption. The unfinished recording was discarded; tap the mic to start again."}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -304,6 +336,13 @@ const styles = StyleSheet.create({
   container: {
     paddingHorizontal: 14,
     paddingTop: 8,
+  },
+  interruptionHint: {
+    paddingHorizontal: 12,
+    paddingTop: 6,
+    fontFamily: FONTS.regular,
+    fontSize: 12,
+    lineHeight: 17,
   },
   inputRow: {
     flexDirection: "row",

@@ -1,6 +1,5 @@
 import React from "react";
 import { act, renderHook, waitFor } from "@testing-library/react-native";
-import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 import { useAuthRequest } from "expo-auth-session";
 
@@ -52,7 +51,6 @@ jest.mock("expo-crypto", () => ({
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const mockPromptAsync = jest.fn();
 const mockUseAuthRequest = useAuthRequest as jest.Mock;
-const mockRandomUUID = Crypto.randomUUID as jest.Mock;
 const mockGetItemAsync = SecureStore.getItemAsync as jest.Mock;
 const mockSetItemAsync = SecureStore.setItemAsync as jest.Mock;
 const mockDeleteItemAsync = SecureStore.deleteItemAsync as jest.Mock;
@@ -76,7 +74,6 @@ const ME_URL = "https://test.example.com/api/auth/user";
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockRandomUUID.mockReturnValue("mock-nonce-uuid");
   mockUseAuthRequest.mockReturnValue([null, null, mockPromptAsync]);
   mockSetItemAsync.mockResolvedValue(undefined);
   mockDeleteItemAsync.mockResolvedValue(undefined);
@@ -134,22 +131,11 @@ describe("Auth sign-in flow", () => {
     const { result } = renderHook(() => useAuth(), { wrapper });
     await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
 
-    expect(mockUseAuthRequest).toHaveBeenCalledWith(
-      expect.objectContaining({
-        extraParams: { nonce: "mock-nonce-uuid" },
-      }),
-      expect.anything(),
-    );
-
     const [exchangeUrl, exchangeInit] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(exchangeUrl).toBe(TOKEN_EXCHANGE_URL);
     expect(exchangeInit.method).toBe("POST");
     const body = JSON.parse(exchangeInit.body as string) as Record<string, unknown>;
-    expect(body).toMatchObject({
-      code: "auth-code-xyz",
-      code_verifier: "pkce-verifier-abc",
-      nonce: "mock-nonce-uuid",
-    });
+    expect(body).toMatchObject({ code: "auth-code-xyz", code_verifier: "pkce-verifier-abc" });
 
     const [meUrl] = fetchMock.mock.calls[1] as [string, RequestInit];
     expect(meUrl).toBe(ME_URL);

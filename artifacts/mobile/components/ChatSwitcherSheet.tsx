@@ -4,7 +4,6 @@ import * as Haptics from "expo-haptics";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   Platform,
@@ -16,6 +15,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { FONTS } from "@/constants/fonts";
+import { confirmAction } from "@/lib/confirmAction";
 import { useColors } from "@/hooks/useColors";
 
 interface ChatSwitcherSheetProps {
@@ -145,17 +145,11 @@ export function ChatSwitcherSheet({
 
   const handleDeletePress = (id: number, title: string) => {
     haptic();
-    Alert.alert(
+    confirmAction(
       "Delete this chat?",
       `"${title}" and all its messages will be permanently removed.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => void handleDeleteConfirmed(id),
-        },
-      ],
+      "Delete",
+      () => void handleDeleteConfirmed(id),
     );
   };
 

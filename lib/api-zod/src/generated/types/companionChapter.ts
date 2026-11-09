@@ -7,6 +7,10 @@
  */
 
 export interface CompanionChapter {
+  /** Original narrative lines; absent for older chapters. */
+  sourceLines?: string[];
+  /** Original memory time in epoch ms; fall back to from for older chapters. */
+  memoryDate?: number;
   /** Epoch ms of the earliest moment the chapter covers. */
   from: number;
   /** Epoch ms of the latest moment the chapter covers. */
@@ -15,8 +19,4 @@ export interface CompanionChapter {
   text: string;
   /** Core themes of the period (normalized topic keys). */
   themes: string[];
-  /** Optional source lines that grounded this chapter. */
-  sourceLines?: string[];
-  /** Optional representative epoch ms for the chapter memory. */
-  memoryDate?: number;
 }

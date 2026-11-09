@@ -24,17 +24,16 @@ import type {
   AuthUserEnvelope,
   BeginBrowserLoginParams,
   CheckInInput,
-  ClearConversationSuccess,
+  CheckInResult,
   CompanionMemory,
   CompanionSelf,
   CompanionSelfHistory,
   CompanionSettings,
   CompanionSettingsInput,
   Conversation,
-  ConversationEnvelope,
   ConversationInput,
   ConversationUpdate,
-  DeleteAccountSuccess,
+  DeleteResult,
   ErrorEnvelope,
   HandleBrowserLoginCallbackParams,
   HealthStatus,
@@ -43,8 +42,6 @@ import type {
   MessageInput,
   MobileTokenExchangeRequest,
   MobileTokenExchangeSuccess,
-  SaveMessageRequest,
-  SaveMessageResponse,
   SendMessageResult,
   SpeechInput,
   SpeechResult,
@@ -755,6 +752,70 @@ export const useCreateConversation = <TError = ErrorType<ApiError>,
       return useMutation(getCreateConversationMutationOptions(options));
     }
 
+export const getRemoveConversationUrl = (id: number,) => {
+
+
+
+
+  return `/api/conversations/${id}`
+}
+
+export const removeConversation = async (id: number, options?: RequestInit): Promise<DeleteResult> => {
+
+  return customFetch<DeleteResult>(getRemoveConversationUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getRemoveConversationMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeConversation>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof removeConversation>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['removeConversation'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof removeConversation>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  removeConversation(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RemoveConversationMutationResult = NonNullable<Awaited<ReturnType<typeof removeConversation>>>
+
+    export type RemoveConversationMutationError = ErrorType<void>
+
+    export const useRemoveConversation = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeConversation>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof removeConversation>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getRemoveConversationMutationOptions(options));
+    }
+
 export const getGetConversationUrl = (id: number,) => {
 
 
@@ -1065,9 +1126,9 @@ export const getCompanionCheckInUrl = (id: number,) => {
  * @summary Generate a proactive companion check-in greeting
  */
 export const companionCheckIn = async (id: number,
-    checkInInput: CheckInInput, options?: RequestInit): Promise<Message> => {
+    checkInInput: CheckInInput, options?: RequestInit): Promise<CheckInResult> => {
 
-  return customFetch<Message>(getCompanionCheckInUrl(id),
+  return customFetch<CheckInResult>(getCompanionCheckInUrl(id),
   {
     ...options,
     method: 'POST',
@@ -1123,6 +1184,72 @@ export const useCompanionCheckIn = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getCompanionCheckInMutationOptions(options));
+    }
+
+export const getRemoveCompanionFactUrl = (id: number,
+    key: string,) => {
+
+
+
+
+  return `/api/conversations/${id}/companion/facts/${key}`
+}
+
+export const removeCompanionFact = async (id: number,
+    key: string, options?: RequestInit): Promise<DeleteResult> => {
+
+  return customFetch<DeleteResult>(getRemoveCompanionFactUrl(id,key),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getRemoveCompanionFactMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeCompanionFact>>, TError,{id: number;key: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof removeCompanionFact>>, TError,{id: number;key: string}, TContext> => {
+
+const mutationKey = ['removeCompanionFact'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof removeCompanionFact>>, {id: number;key: string}> = (props) => {
+          const {id,key} = props ?? {};
+
+          return  removeCompanionFact(id,key,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RemoveCompanionFactMutationResult = NonNullable<Awaited<ReturnType<typeof removeCompanionFact>>>
+
+    export type RemoveCompanionFactMutationError = ErrorType<void>
+
+    export const useRemoveCompanionFact = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeCompanionFact>>, TError,{id: number;key: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof removeCompanionFact>>,
+        TError,
+        {id: number;key: string},
+        TContext
+      > => {
+      return useMutation(getRemoveCompanionFactMutationOptions(options));
     }
 
 export const getGetCompanionSelfUrl = (id: number,) => {
@@ -1794,291 +1921,3 @@ export const useSynthesizeSpeech = <TError = ErrorType<ApiError>,
       return useMutation(getSynthesizeSpeechMutationOptions(options));
     }
 
-export const getGetConversationMessagesUrl = (conversationId: number,) => {
-
-
-
-
-  return `/api/conversations/${conversationId}/messages`
-}
-
-/**
- * @summary Load the messages for a specific conversation
- */
-export const getConversationMessages = async (conversationId: number, options?: RequestInit): Promise<ConversationEnvelope> => {
-
-  return customFetch<ConversationEnvelope>(getGetConversationMessagesUrl(conversationId),
-  {
-    ...options,
-    method: 'GET'
-
-
-  }
-);}
-
-
-
-
-
-export const getGetConversationMessagesQueryKey = (conversationId: number,) => {
-    return [
-    `/api/conversations/${conversationId}/messages`
-    ] as const;
-    }
-
-
-export const getGetConversationMessagesQueryOptions = <TData = Awaited<ReturnType<typeof getConversationMessages>>, TError = ErrorType<ErrorEnvelope>>(conversationId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getConversationMessages>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
-) => {
-
-const {query: queryOptions, request: requestOptions} = options ?? {};
-
-  const queryKey =  queryOptions?.queryKey ?? getGetConversationMessagesQueryKey(conversationId);
-
-
-
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getConversationMessages>>> = ({ signal }) => getConversationMessages(conversationId, { signal, ...requestOptions });
-
-
-
-
-
-   return  { queryKey, queryFn, enabled: !!(conversationId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getConversationMessages>>, TError, TData> & { queryKey: QueryKey }
-}
-
-export type GetConversationMessagesQueryResult = NonNullable<Awaited<ReturnType<typeof getConversationMessages>>>
-export type GetConversationMessagesQueryError = ErrorType<ErrorEnvelope>
-
-
-/**
- * @summary Load the messages for a specific conversation
- */
-
-export function useGetConversationMessages<TData = Awaited<ReturnType<typeof getConversationMessages>>, TError = ErrorType<ErrorEnvelope>>(
- conversationId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getConversationMessages>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
-
- ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-
-  const queryOptions = getGetConversationMessagesQueryOptions(conversationId,options)
-
-  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
-
-  return { ...query, queryKey: queryOptions.queryKey };
-}
-
-
-
-
-
-
-
-export const getSaveConversationMessageUrl = (conversationId: number,) => {
-
-
-
-
-  return `/api/conversations/${conversationId}/messages`
-}
-
-/**
- * @summary Append a message to a specific conversation
- */
-export const saveConversationMessage = async (conversationId: number,
-    saveMessageRequest: SaveMessageRequest, options?: RequestInit): Promise<SaveMessageResponse> => {
-
-  return customFetch<SaveMessageResponse>(getSaveConversationMessageUrl(conversationId),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(
-      saveMessageRequest,)
-  }
-);}
-
-
-
-
-export const getSaveConversationMessageMutationOptions = <TError = ErrorType<ErrorEnvelope>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveConversationMessage>>, TError,{conversationId: number;data: BodyType<SaveMessageRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof saveConversationMessage>>, TError,{conversationId: number;data: BodyType<SaveMessageRequest>}, TContext> => {
-
-const mutationKey = ['saveConversationMessage'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveConversationMessage>>, {conversationId: number;data: BodyType<SaveMessageRequest>}> = (props) => {
-          const {conversationId,data} = props ?? {};
-
-          return  saveConversationMessage(conversationId,data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type SaveConversationMessageMutationResult = NonNullable<Awaited<ReturnType<typeof saveConversationMessage>>>
-    export type SaveConversationMessageMutationBody = BodyType<SaveMessageRequest>
-    export type SaveConversationMessageMutationError = ErrorType<ErrorEnvelope>
-
-    /**
- * @summary Append a message to a specific conversation
- */
-export const useSaveConversationMessage = <TError = ErrorType<ErrorEnvelope>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveConversationMessage>>, TError,{conversationId: number;data: BodyType<SaveMessageRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof saveConversationMessage>>,
-        TError,
-        {conversationId: number;data: BodyType<SaveMessageRequest>},
-        TContext
-      > => {
-      return useMutation(getSaveConversationMessageMutationOptions(options));
-    }
-
-export const getDeleteConversationUrl = (conversationId: number,) => {
-
-
-
-
-  return `/api/conversations/${conversationId}`
-}
-
-/**
- * @summary Delete a specific conversation and its messages
- */
-export const deleteConversation = async (conversationId: number, options?: RequestInit): Promise<ClearConversationSuccess> => {
-
-  return customFetch<ClearConversationSuccess>(getDeleteConversationUrl(conversationId),
-  {
-    ...options,
-    method: 'DELETE'
-
-
-  }
-);}
-
-
-
-
-export const getDeleteConversationMutationOptions = <TError = ErrorType<ErrorEnvelope>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteConversation>>, TError,{conversationId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof deleteConversation>>, TError,{conversationId: number}, TContext> => {
-
-const mutationKey = ['deleteConversation'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteConversation>>, {conversationId: number}> = (props) => {
-          const {conversationId} = props ?? {};
-
-          return  deleteConversation(conversationId,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type DeleteConversationMutationResult = NonNullable<Awaited<ReturnType<typeof deleteConversation>>>
-
-    export type DeleteConversationMutationError = ErrorType<ErrorEnvelope>
-
-    /**
- * @summary Delete a specific conversation and its messages
- */
-export const useDeleteConversation = <TError = ErrorType<ErrorEnvelope>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteConversation>>, TError,{conversationId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof deleteConversation>>,
-        TError,
-        {conversationId: number},
-        TContext
-      > => {
-      return useMutation(getDeleteConversationMutationOptions(options));
-    }
-
-export const getDeleteAccountUrl = () => {
-
-
-
-
-  return `/api/account`
-}
-
-/**
- * @summary Permanently delete the authenticated user and all their data
- */
-export const deleteAccount = async ( options?: RequestInit): Promise<DeleteAccountSuccess> => {
-
-  return customFetch<DeleteAccountSuccess>(getDeleteAccountUrl(),
-  {
-    ...options,
-    method: 'DELETE'
-
-
-  }
-);}
-
-
-
-
-export const getDeleteAccountMutationOptions = <TError = ErrorType<ErrorEnvelope>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAccount>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof deleteAccount>>, TError,void, TContext> => {
-
-const mutationKey = ['deleteAccount'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteAccount>>, void> = () => {
-
-
-          return  deleteAccount(requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type DeleteAccountMutationResult = NonNullable<Awaited<ReturnType<typeof deleteAccount>>>
-
-    export type DeleteAccountMutationError = ErrorType<ErrorEnvelope>
-
-    /**
- * @summary Permanently delete the authenticated user and all their data
- */
-export const useDeleteAccount = <TError = ErrorType<ErrorEnvelope>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAccount>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof deleteAccount>>,
-        TError,
-        void,
-        TContext
-      > => {
-      return useMutation(getDeleteAccountMutationOptions(options));
-    }

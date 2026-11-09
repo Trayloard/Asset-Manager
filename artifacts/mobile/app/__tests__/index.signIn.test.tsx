@@ -10,15 +10,33 @@
  */
 
 import React from "react";
-import { render, waitFor, fireEvent } from "@testing-library/react-native";
+import { act, render, waitFor, fireEvent } from "@testing-library/react-native";
 
 import * as SecureStore from "expo-secure-store";
 import { useAuthRequest } from "expo-auth-session";
 
 import { AuthProvider } from "@/lib/auth";
 
+const mockUseFonts = jest.fn();
+const mockPreventAutoHideAsync = jest.fn();
+const mockHideAsync = jest.fn();
+
 // ── Environment ───────────────────────────────────────────────────────────────
 process.env.EXPO_PUBLIC_DOMAIN = "test.example.com";
+
+jest.mock("@expo-google-fonts/plus-jakarta-sans", () => ({
+  PlusJakartaSans_400Regular: "PlusJakartaSans_400Regular",
+  PlusJakartaSans_500Medium: "PlusJakartaSans_500Medium",
+  PlusJakartaSans_600SemiBold: "PlusJakartaSans_600SemiBold",
+  PlusJakartaSans_700Bold: "PlusJakartaSans_700Bold",
+  PlusJakartaSans_800ExtraBold: "PlusJakartaSans_800ExtraBold",
+  useFonts: (...args: unknown[]) => mockUseFonts(...args),
+}));
+
+jest.mock("expo-splash-screen", () => ({
+  preventAutoHideAsync: mockPreventAutoHideAsync,
+  hideAsync: mockHideAsync,
+}));
 
 // ── Heavy native modules ──────────────────────────────────────────────────────
 jest.mock("expo-web-browser", () => ({
@@ -54,6 +72,10 @@ jest.mock("expo-status-bar", () => ({
   StatusBar: () => null,
 }));
 
+jest.mock("expo", () => ({
+  reloadAppAsync: jest.fn(),
+}));
+
 jest.mock("expo-blur", () => {
   const { View } = require("react-native");
   return { BlurView: View };
@@ -61,6 +83,12 @@ jest.mock("expo-blur", () => {
 
 jest.mock("expo-router", () => ({
   useRouter: jest.fn(() => ({ push: jest.fn() })),
+  useFocusEffect: jest.fn(),
+  Stack: () => {
+    const React = require("react");
+    const CompanionScreen = require("../index").default;
+    return React.createElement(CompanionScreen);
+  },
 }));
 
 jest.mock("@expo/vector-icons", () => ({
@@ -68,6 +96,7 @@ jest.mock("@expo/vector-icons", () => ({
 }));
 
 jest.mock("react-native-safe-area-context", () => ({
+  SafeAreaProvider: ({ children }: { children: React.ReactNode }) => children,
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 
@@ -95,7 +124,10 @@ jest.mock("react-native-gesture-handler", () => {
 
 jest.mock("react-native-keyboard-controller", () => {
   const { View } = require("react-native");
-  return { KeyboardAvoidingView: View };
+  return {
+    KeyboardAvoidingView: View,
+    KeyboardProvider: ({ children }: { children: React.ReactNode }) => children,
+  };
 });
 
 // ── App-local mocks ───────────────────────────────────────────────────────────
@@ -190,6 +222,7 @@ const mockCompanion = {
 };
 
 jest.mock("@/contexts/CompanionContext", () => ({
+  CompanionProvider: ({ children }: { children: React.ReactNode }) => children,
   useCompanion: () => mockCompanion,
 }));
 
@@ -221,6 +254,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockPromptAsync.mockResolvedValue({ type: "dismiss" });
   mockUseAuthRequest.mockReturnValue([null, null, mockPromptAsync]);
+  mockUseFonts.mockReturnValue([true, null]);
   mockGetItemAsync.mockResolvedValue(null);
   mockSetItemAsync.mockResolvedValue(undefined);
   (SecureStore.deleteItemAsync as jest.Mock).mockResolvedValue(undefined);
@@ -230,6 +264,80 @@ beforeEach(() => {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("CompanionScreen — sign-in flow", () => {
+  it(
+    "waits for fonts on a cold start, then renders the sign-in screen",
+    async () => {
+      mockUseFonts.mockReturnValue([false, null]);
+      const RootLayout = require("../_layout").default as React.ComponentType;
+      const { rerender, queryByText, getByText } = render(<RootLayout />);
+
+      expect(queryByText("Welcome to Empiri")).toBeNull();
+      expect(mockHideAsync).not.toHaveBeenCalled();
+
+      mockUseFonts.mockReturnValue([true, null]);
+      rerender(<RootLayout />);
+
+      await waitFor(
+        () => {
+          expect(getByText("Welcome to Empiri")).toBeTruthy();
+          expect(getByText("Sign in to start your conversation.")).toBeTruthy();
+          expect(getByText("Sign in")).toBeTruthy();
+        },
+        { timeout: 5000 },
+      );
+      expect(mockHideAsync).toHaveBeenCalled();
+    },
+    15000,
+  );
+
+  it(
+    "shows the sign-in screen and hides the splash screen when font loading fails",
+    async () => {
+      mockUseFonts.mockReturnValue([false, new Error("Font loading failed")]);
+      const RootLayout = require("../_layout").default as React.ComponentType;
+      const { getByText } = render(<RootLayout />);
+
+      await waitFor(
+        () => {
+          expect(getByText("Welcome to Empiri")).toBeTruthy();
+          expect(getByText("Sign in to start your conversation.")).toBeTruthy();
+          expect(getByText("Sign in")).toBeTruthy();
+        },
+        { timeout: 5000 },
+      );
+      expect(mockHideAsync).toHaveBeenCalled();
+    },
+    15000,
+  );
+
+  it(
+    "shows the sign-in screen when font loading stays pending",
+    async () => {
+      jest.useFakeTimers();
+      try {
+        mockUseFonts.mockReturnValue([false, null]);
+        const RootLayout = require("../_layout").default as React.ComponentType;
+        const { getByText, queryByText } = render(<RootLayout />);
+
+        expect(queryByText("Welcome to Empiri")).toBeNull();
+
+        await act(async () => {
+          jest.advanceTimersByTime(10_000);
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+
+        expect(getByText("Welcome to Empiri")).toBeTruthy();
+        expect(getByText("Sign in to start your conversation.")).toBeTruthy();
+        expect(getByText("Sign in")).toBeTruthy();
+        expect(mockHideAsync).toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
+    },
+    15000,
+  );
+
   it("renders the sign-in screen when the user is not authenticated", async () => {
     const { getByText } = renderScreen();
 

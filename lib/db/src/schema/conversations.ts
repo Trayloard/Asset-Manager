@@ -10,11 +10,14 @@ export const conversations = pgTable("conversations", {
   /** Condensed summary of messages that have slid out of the context window. */
   contextSummary: text("context_summary"),
   /**
-   * How many messages were in the history when contextSummary was last
-   * generated.  Used as a watermark so each summary refresh only processes
-   * the incremental delta, not the full overflow.
+   * Number of eligible messages already summarized (after the clear boundary).
+   * Used as a watermark so each refresh only processes the incremental delta.
    */
   contextSummaryMessageCount: integer("context_summary_message_count"),
+  /** Messages at or below this ID must never enter a future summary. */
+  contextSummaryAfterMessageId: integer("context_summary_after_message_id").notNull().default(0),
+  /** Optimistic concurrency token for summaries, edits, and clears. */
+  contextSummaryRevision: integer("context_summary_revision").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 

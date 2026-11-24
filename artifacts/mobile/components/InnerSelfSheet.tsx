@@ -1,13 +1,17 @@
 import { Feather } from "@expo/vector-icons";
 import {
+  clearCompanionMemory,
+  deleteCompanionFact,
   getCompanionMemory,
   getCompanionSelf,
+  updateCompanionMemory,
   type CompanionInterest,
   type CompanionSelf,
 } from "@workspace/api-client-react";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
-import React, { useEffect, useMemo, useState } from "react";
+import { useRouter } from "expo-router";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
@@ -16,6 +20,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
   useWindowDimensions,
 } from "react-native";
@@ -72,6 +77,8 @@ interface InnerSelfSheetProps {
    * keeps today's exact colors.
    */
   warmth?: number;
+  /** The user's personalised companion name; falls back to "Empiri". */
+  companionName?: string;
 }
 
 // ── A monospace face for node labels gives the "mind map" its circuit-board
@@ -94,20 +101,20 @@ const CAT_COLOR: Record<Category, string> = {
   voice: "#5FE0C0",
 };
 
-const DRIVE_BLURB: Record<string, string> = {
-  connection: "How much Empiri is craving real back-and-forth with you.",
+const driveBlurb = (name: string): Record<string, string> => ({
+  connection: `How much ${name} is craving real back-and-forth with you.`,
   curiosity: "Its appetite for questions and wondering out loud.",
   novelty: "Its itch for fresh topics and new ground to explore.",
   expression: "Its need to open up and say what it's feeling.",
-};
+});
 
-const TRAIT_BLURB: Record<string, string> = {
-  warmth: "How tender and caring Empiri tends to be with you.",
+const traitBlurb = (name: string): Record<string, string> => ({
+  warmth: `How tender and caring ${name} tends to be with you.`,
   playfulness: "How light, teasing, and playful it likes to be.",
   curiosity: "How eagerly it leans toward the unknown.",
   openness: "How readily it welcomes new ideas and feelings.",
   calm: "How steady and unhurried it stays.",
-};
+});
 
 interface NodeDetail {
   title: string;
@@ -129,6 +136,11 @@ interface GNode {
   value: number | null;
   isHub: boolean;
   detail: NodeDetail;
+  /**
+   * Set on theme nodes only: pressing the node toggles the inline expansion
+   * of this theme's member curiosities instead of opening the detail card.
+   */
+  toggleId?: string;
 }
 
 interface GEdge {
@@ -234,7 +246,7 @@ type InterestItem =
   | {
       kind: "theme";
       label: string;
-      members: { topic: string; affinity: number }[];
+      members: { topic: string; display: string; affinity: number }[];
     };
 
 // Blend member affinities into one "combined weight" so a cluster glows at
@@ -308,6 +320,7 @@ function groupInterests(
     const members = idxs
       .map((i) => ({
         topic: interests[i].topic,
+        display: interests[i].display,
         affinity: interests[i].affinity,
       }))
       .sort((a, b) => b.affinity - a.affinity);
@@ -321,7 +334,14 @@ function groupInterests(
 // TRAITS → INTERESTS → VOICE) with their values branching into two side
 // columns below each hub. The centre stays clear so the spine wires never
 // cross a leaf.
-function buildGraph(self: CompanionSelf, fullWidth: number): Graph {
+function buildGraph(
+  self: CompanionSelf,
+  fullWidth: number,
+  name: string,
+  expandedThemes: ReadonlySet<string> = new Set(),
+): Graph {
+  const DRIVE_BLURB = driveBlurb(name);
+  const TRAIT_BLURB = traitBlurb(name);
   const width = Math.min(fullWidth, MAX_W);
   const centerX = width / 2;
   const leftX = width * 0.255;
@@ -349,7 +369,7 @@ function buildGraph(self: CompanionSelf, fullWidth: number): Graph {
       title: "You",
       role: "Where it all begins",
       blurb:
-        "Every message you send is how Empiri senses the world. Everything in this map grew from your moments together.",
+        `Every message you send is how ${name} senses the world. Everything in this map grew from your moments together.`,
       valueLabel: momentsPhrase(self.interactions, self.ageHours),
     },
   });
@@ -360,7 +380,14 @@ function buildGraph(self: CompanionSelf, fullWidth: number): Graph {
     label: string,
     category: Category,
     hubDetail: NodeDetail,
-    leaves: { id: string; label: string; value: number; detail: NodeDetail }[],
+    leaves: {
+      id: string;
+      label: string;
+      value: number;
+      detail: NodeDetail;
+      parent?: string;
+      toggleId?: string;
+    }[],
   ) => {
     const bandTop = bottom + BAND_GAP;
     nodes.push({
@@ -394,8 +421,9 @@ function buildGraph(self: CompanionSelf, fullWidth: number): Graph {
         value: lf.value,
         isHub: false,
         detail: lf.detail,
+        toggleId: lf.toggleId,
       });
-      edges.push({ from: id, to: lf.id, spine: false });
+      edges.push({ from: lf.parent ?? id, to: lf.id, spine: false });
       maxB = Math.max(maxB, cy + LEAF_H / 2);
     });
 
@@ -411,7 +439,7 @@ function buildGraph(self: CompanionSelf, fullWidth: number): Graph {
       title: "Drives",
       role: "The nucleus",
       blurb:
-        "Empiri's needs — the quiet pulls behind how it feels. When one goes unmet for a while, it starts to crave it.",
+        `${name}'s needs — the quiet pulls behind how it feels. When one goes unmet for a while, it starts to crave it.`,
     },
     self.drives.map((d) => ({
       id: `drive-${d.key}`,
@@ -420,7 +448,7 @@ function buildGraph(self: CompanionSelf, fullWidth: number): Graph {
       detail: {
         title: titleCase(d.key),
         role: "Drive · a quiet need",
-        blurb: DRIVE_BLURB[d.key] ?? "A quiet need shaping how Empiri feels.",
+        blurb: DRIVE_BLURB[d.key] ?? `A quiet need shaping how ${name} feels.`,
         valueLabel: cravingPhrase(d.striving),
         valuePct: clamp(d.striving),
       },
@@ -460,49 +488,82 @@ function buildGraph(self: CompanionSelf, fullWidth: number): Graph {
       role: "Its curiosities",
       blurb:
         self.interests.length > 0
-          ? "The things that have caught Empiri's eye, grown from what you talk about."
-          : "Nothing here yet — Empiri's curiosities grow as you chat.",
+          ? `The things that have caught ${name}'s eye, grown from what you talk about.`
+          : `Nothing here yet — ${name}'s curiosities grow as you chat.`,
     },
-    groupInterests(self.interests, self.themes).map((item) => {
-      if (item.kind === "single") {
-        return {
-          id: `interest-${item.orig}`,
-          label: item.display.toUpperCase(),
-          value: clamp(item.affinity),
+    (() => {
+      const usedSlugs = new Set<string>();
+      return groupInterests(self.interests, self.themes).flatMap((item) => {
+        if (item.kind === "single") {
+          return [
+            {
+              id: `interest-${item.orig}`,
+              label: item.display.toUpperCase(),
+              value: clamp(item.affinity),
+              detail: {
+                title: item.display,
+                role: "Curiosity · caught its eye",
+                blurb:
+                  "Something you've talked about that's started to matter to Empiri.",
+                valueLabel: affinityPhrase(item.affinity),
+                valuePct: clamp(item.affinity),
+              },
+            },
+          ];
+        }
+        const value = combinedWeight(item.members);
+        // Slugs must stay unique even if two theme labels collapse to the
+        // same slug — duplicate node ids would scramble wires and React keys.
+        let slug = item.label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+        if (usedSlugs.has(slug)) {
+          let n = 2;
+          while (usedSlugs.has(`${slug}-${n}`)) n++;
+          slug = `${slug}-${n}`;
+        }
+        usedSlugs.add(slug);
+        const themeId = `interest-theme-${slug}`;
+        const shown = item.members.slice(0, 6);
+        const lines = shown.map(
+          (m) => `${m.topic.toUpperCase()} · ${affinityPhrase(m.affinity)}`,
+        );
+        if (item.members.length > shown.length) {
+          lines.push(`+${item.members.length - shown.length} more`);
+        }
+        const themeLeaf = {
+          id: themeId,
+          toggleId: slug,
+          label: `${item.label.toUpperCase()} ·${item.members.length}`,
+          value,
           detail: {
-            title: item.display,
-            role: "Curiosity · caught its eye",
+            title: item.label,
+            role: `Theme · ${item.members.length} curiosities`,
             blurb:
-              "Something you've talked about that's started to matter to Empiri.",
-            valueLabel: affinityPhrase(item.affinity),
-            valuePct: clamp(item.affinity),
+              "A few related things you keep coming back to, gathered into one curiosity. Tap to open or close it.",
+            valueLabel: affinityPhrase(value),
+            valuePct: value,
+            lines,
           },
         };
-      }
-      const value = combinedWeight(item.members);
-      const slug = item.label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-      const shown = item.members.slice(0, 6);
-      const lines = shown.map(
-        (m) => `${m.topic.toUpperCase()} · ${affinityPhrase(m.affinity)}`,
-      );
-      if (item.members.length > shown.length) {
-        lines.push(`+${item.members.length - shown.length} more`);
-      }
-      return {
-        id: `interest-theme-${slug}`,
-        label: `${item.label.toUpperCase()} ·${item.members.length}`,
-        value,
-        detail: {
-          title: item.label,
-          role: `Theme · ${item.members.length} curiosities`,
-          blurb:
-            "A few related things you keep coming back to, gathered into one curiosity.",
-          valueLabel: affinityPhrase(value),
-          valuePct: value,
-          lines,
-        },
-      };
-    }),
+        if (!expandedThemes.has(slug)) return [themeLeaf];
+        return [
+          themeLeaf,
+          ...item.members.map((m, j) => ({
+            id: `${themeId}-m${j}`,
+            parent: themeId,
+            label: m.display.toUpperCase(),
+            value: clamp(m.affinity),
+            detail: {
+              title: m.display,
+              role: `Curiosity · part of ${item.label}`,
+              blurb:
+                "Something you've talked about that's started to matter to Empiri.",
+              valueLabel: affinityPhrase(m.affinity),
+              valuePct: clamp(m.affinity),
+            },
+          })),
+        ];
+      });
+    })(),
   );
 
   const vTop = bottom + BAND_GAP;
@@ -519,7 +580,7 @@ function buildGraph(self: CompanionSelf, fullWidth: number): Graph {
     detail: {
       title: "Voice",
       role: "How it all comes together",
-      blurb: "All of this shapes the way Empiri talks with you.",
+      blurb: `All of this shapes the way ${name} talks with you.`,
       lines:
         self.narrative.length > 0
           ? self.narrative
@@ -537,11 +598,14 @@ function NodeView({
   pulse,
   reduceMotion,
   onPress,
+  isExpanded,
 }: {
   node: GNode;
   pulse: SharedValue<number>;
   reduceMotion: boolean;
   onPress: (n: GNode) => void;
+  /** Defined only for theme nodes (those with a toggleId). */
+  isExpanded?: boolean;
 }) {
   const color = CAT_COLOR[node.category];
   // Hubs breathe at a steady base; leaves breathe brighter the higher their
@@ -564,11 +628,17 @@ function NodeView({
     onPress(node);
   };
 
+  const a11yLabel =
+    node.toggleId != null
+      ? `${node.detail.title} theme, ${isExpanded ? "expanded" : "collapsed"}`
+      : `${node.detail.title}. ${node.detail.role}`;
+
   return (
     <Pressable
       onPress={handlePress}
       accessibilityRole="button"
-      accessibilityLabel={`${node.detail.title}. ${node.detail.role}`}
+      accessibilityLabel={a11yLabel}
+      accessibilityState={node.toggleId != null ? { expanded: isExpanded ?? false } : undefined}
       testID={`node-${node.id}`}
       style={[
         styles.node,
@@ -623,7 +693,10 @@ export function InnerSelfSheet({
   conversationId,
   onClose,
   warmth = 0,
+  companionName = "Empiri",
 }: InnerSelfSheetProps) {
+  const router = useRouter();
+  const name = companionName.trim() || "Empiri";
   // Centre-anchored personality tint — neutral warmth keeps today's accent.
   const sheetAccent = accentForWarmth(warmth, SHEET_ACCENT, SHEET_SPECTRUM);
   const insets = useSafeAreaInsets();
@@ -634,10 +707,41 @@ export function InnerSelfSheet({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [selected, setSelected] = useState<GNode | null>(null);
+  // Slugs of curiosity themes currently expanded inline on the mind map.
+  const [expandedThemes, setExpandedThemes] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [mode, setMode] = useState<SheetMode>("mind");
   const [memory, setMemory] = useState<string | null>(null);
   const [memoryLoading, setMemoryLoading] = useState(false);
   const [memoryError, setMemoryError] = useState(false);
+  // Light control over the memory: inline editing, clearing (with an inline
+  // confirm so it works everywhere, including web), and save/clear progress.
+  const [memoryEditing, setMemoryEditing] = useState(false);
+  const [memoryDraft, setMemoryDraft] = useState("");
+  const [memorySaving, setMemorySaving] = useState(false);
+  const [memoryConfirmClear, setMemoryConfirmClear] = useState(false);
+  const [memoryActionError, setMemoryActionError] = useState<string | null>(
+    null,
+  );
+  // Bumping these re-runs the matching fetch effect — the in-place "Try
+  // again" path for transient failures.
+  const [selfAttempt, setSelfAttempt] = useState(0);
+  const [memoryAttempt, setMemoryAttempt] = useState(0);
+
+  // Tracks whether a background theme refresh has fired for the current
+  // sheet open. Reset when the sheet closes so each open gets one refresh.
+  const bgThemeRefreshFired = useRef(false);
+
+  // Durable personal facts Empiri holds about the user, most salient first.
+  const facts = self?.facts ?? [];
+
+  // Which fact key is awaiting inline confirmation before deletion.
+  const [confirmDeleteFactKey, setConfirmDeleteFactKey] = useState<string | null>(null);
+  // Which fact key is currently being deleted (in-flight API call).
+  const [deletingFactKey, setDeletingFactKey] = useState<string | null>(null);
+  // Error shown beneath the facts card when a delete fails.
+  const [factDeleteError, setFactDeleteError] = useState<string | null>(null);
 
   const switchMode = (next: SheetMode) => {
     if (next === mode) return;
@@ -648,14 +752,100 @@ export function InnerSelfSheet({
     setMode(next);
   };
 
+  const confirmFactDelete = (key: string) => {
+    setFactDeleteError(null);
+    setConfirmDeleteFactKey(key);
+  };
+
+  const cancelFactDelete = () => {
+    setConfirmDeleteFactKey(null);
+  };
+
+  const deleteFact = async (key: string) => {
+    if (conversationId == null || deletingFactKey != null) return;
+    setConfirmDeleteFactKey(null);
+    setFactDeleteError(null);
+    setDeletingFactKey(key);
+
+    // Optimistically remove from local state so the UI responds instantly.
+    const previousFacts = self?.facts ?? [];
+    setSelf((prev) =>
+      prev ? { ...prev, facts: prev.facts.filter((f) => f.key !== key) } : prev,
+    );
+
+    try {
+      await deleteCompanionFact(conversationId, key);
+      if (Platform.OS !== "web") {
+        Haptics.notificationAsync(
+          Haptics.NotificationFeedbackType.Success,
+        ).catch(() => {});
+      }
+    } catch {
+      // Restore on failure.
+      setSelf((prev) =>
+        prev ? { ...prev, facts: previousFacts } : prev,
+      );
+      setFactDeleteError("Couldn't remove that just now. Please try again.");
+    } finally {
+      setDeletingFactKey(null);
+    }
+  };
+
   useEffect(() => {
     if (!visible || conversationId == null) return;
     let cancelled = false;
     setLoading(true);
     setError(false);
+
+    // Only the very first attempt per sheet open fires the background theme
+    // refresh. Retries skip it so they don't add unexpected extra fetches.
+    const shouldFireBgRefresh = !bgThemeRefreshFired.current;
+    bgThemeRefreshFired.current = true;
+
     getCompanionSelf(conversationId)
       .then((data) => {
-        if (!cancelled) setSelf(data);
+        if (!cancelled) {
+          setSelf(data);
+
+          if (shouldFireBgRefresh) {
+            // Poll for fresh themes after the server's background LLM recompute.
+            // The server returns cached (possibly stale or null) themes immediately
+            // and starts a background model call; we wait increasing delays to
+            // give it time to finish before each re-fetch.
+            //
+            // Termination: stop when themes CHANGE from the initial value
+            // (compared by JSON serialisation), which handles both the
+            // null-→-non-null path AND the stale-non-null-→-fresh path.
+            // If the budget is exhausted without a change, we give up silently;
+            // the next sheet open will have a warmer cache.
+            const initialThemesKey = JSON.stringify(data.themes);
+            const DELAYS_MS = [2000, 4000, 6000];
+            let attempt = 0;
+
+            const poll = () => {
+              if (cancelled || attempt >= DELAYS_MS.length) return;
+              const delay = DELAYS_MS[attempt++];
+              setTimeout(() => {
+                if (cancelled) return;
+                getCompanionSelf(conversationId)
+                  .then((fresh) => {
+                    if (cancelled) return;
+                    if (JSON.stringify(fresh.themes) !== initialThemesKey) {
+                      // Themes changed — apply and stop polling.
+                      setSelf((prev) =>
+                        prev ? { ...prev, themes: fresh.themes } : prev,
+                      );
+                    } else {
+                      // Same as before — try again after the next delay.
+                      poll();
+                    }
+                  })
+                  .catch(() => poll());
+              }, delay);
+            };
+            poll();
+          }
+        }
       })
       .catch(() => {
         if (!cancelled) setError(true);
@@ -666,7 +856,7 @@ export function InnerSelfSheet({
     return () => {
       cancelled = true;
     };
-  }, [visible, conversationId]);
+  }, [visible, conversationId, selfAttempt]);
 
   // Empiri's rolling memory of earlier messages (read-only). Fetched alongside
   // the self so the Memory tab is ready the moment it's opened.
@@ -688,15 +878,84 @@ export function InnerSelfSheet({
     return () => {
       cancelled = true;
     };
-  }, [visible, conversationId]);
+  }, [visible, conversationId, memoryAttempt]);
 
   // Reset the open detail card and view mode whenever the sheet is dismissed.
   useEffect(() => {
     if (!visible) {
       setSelected(null);
+      setExpandedThemes(new Set());
       setMode("mind");
+      setMemoryEditing(false);
+      setMemoryConfirmClear(false);
+      setMemoryActionError(null);
+      setConfirmDeleteFactKey(null);
+      setDeletingFactKey(null);
+      setFactDeleteError(null);
+      bgThemeRefreshFired.current = false;
     }
   }, [visible]);
+
+  const startMemoryEdit = () => {
+    if (memory == null) return;
+    setMemoryActionError(null);
+    setMemoryConfirmClear(false);
+    setMemoryDraft(memory);
+    setMemoryEditing(true);
+  };
+
+  const cancelMemoryEdit = () => {
+    setMemoryEditing(false);
+    setMemoryActionError(null);
+  };
+
+  const saveMemoryEdit = async () => {
+    if (conversationId == null || memorySaving) return;
+    const trimmed = memoryDraft.trim();
+    if (!trimmed) {
+      setMemoryActionError("The memory can't be empty — use Forget instead.");
+      return;
+    }
+    setMemorySaving(true);
+    setMemoryActionError(null);
+    try {
+      const updated = await updateCompanionMemory(conversationId, {
+        summary: trimmed,
+      });
+      setMemory(updated.summary ?? null);
+      setMemoryEditing(false);
+      if (Platform.OS !== "web") {
+        Haptics.notificationAsync(
+          Haptics.NotificationFeedbackType.Success,
+        ).catch(() => {});
+      }
+    } catch {
+      setMemoryActionError("Couldn't save just now. Please try again.");
+    } finally {
+      setMemorySaving(false);
+    }
+  };
+
+  const clearMemory = async () => {
+    if (conversationId == null || memorySaving) return;
+    setMemorySaving(true);
+    setMemoryActionError(null);
+    try {
+      await clearCompanionMemory(conversationId);
+      setMemory(null);
+      setMemoryEditing(false);
+      setMemoryConfirmClear(false);
+      if (Platform.OS !== "web") {
+        Haptics.notificationAsync(
+          Haptics.NotificationFeedbackType.Success,
+        ).catch(() => {});
+      }
+    } catch {
+      setMemoryActionError("Couldn't forget just now. Please try again.");
+    } finally {
+      setMemorySaving(false);
+    }
+  };
 
   // One shared heartbeat drives every node's glow.
   const pulse = useSharedValue(reduceMotion ? 0.5 : 0);
@@ -737,9 +996,28 @@ export function InnerSelfSheet({
   });
 
   const graph = useMemo(
-    () => (self ? buildGraph(self, width) : null),
-    [self, width],
+    () => (self ? buildGraph(self, width, name, expandedThemes) : null),
+    [self, width, name, expandedThemes],
   );
+
+  // Theme nodes toggle their inline member curiosities; everything else
+  // opens the bottom detail card.
+  const handleNodePress = (n: GNode) => {
+    const slug = n.toggleId;
+    if (slug != null) {
+      setExpandedThemes((prev) => {
+        const next = new Set(prev);
+        if (next.has(slug)) {
+          next.delete(slug);
+        } else {
+          next.add(slug);
+        }
+        return next;
+      });
+      return;
+    }
+    setSelected(n);
+  };
 
   const wires = useMemo(() => {
     if (!graph) return [];
@@ -797,6 +1075,17 @@ export function InnerSelfSheet({
             <Animated.View style={[styles.aliveDot, aliveStyle]} />
             <Text style={styles.aliveText}>ALIVE</Text>
           </View>
+
+          <Pressable
+            onPress={() => { onClose(); router.push("/evolution-log"); }}
+            testID="evolution-log-btn"
+            accessibilityRole="button"
+            accessibilityLabel="Evolution log"
+            hitSlop={12}
+            style={({ pressed }) => [styles.iconBtn, { opacity: pressed ? 0.6 : 1 }]}
+          >
+            <Feather name="trending-up" size={20} color="#E7E9F5" />
+          </Pressable>
         </View>
 
         <View style={styles.segmentWrap}>
@@ -835,7 +1124,7 @@ export function InnerSelfSheet({
         {mode === "mind" ? (
           <>
             <View style={styles.caption}>
-              <Text style={styles.captionTitle}>EMPIRI&apos;S MIND</Text>
+              <Text style={styles.captionTitle}>{`${name.toUpperCase()}'S MIND`}</Text>
               <Text style={styles.captionSub}>tap a node to look closer</Text>
             </View>
 
@@ -853,6 +1142,24 @@ export function InnerSelfSheet({
                 <Text style={styles.stateText}>
                   Couldn&apos;t peek inside just now.
                 </Text>
+                {error ? (
+                  <Pressable
+                    onPress={() => setSelfAttempt((a) => a + 1)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Try again"
+                    testID="retry-self"
+                    style={({ pressed }) => [
+                      styles.retryBtn,
+                      { borderColor: hexA(sheetAccent, 0.55) },
+                      pressed ? { opacity: 0.7 } : null,
+                    ]}
+                  >
+                    <Feather name="refresh-cw" size={13} color={sheetAccent} />
+                    <Text style={[styles.retryText, { color: sheetAccent }]}>
+                      Try again
+                    </Text>
+                  </Pressable>
+                ) : null}
               </View>
             ) : (
               <ScrollView
@@ -900,7 +1207,12 @@ export function InnerSelfSheet({
                       node={n}
                       pulse={pulse}
                       reduceMotion={reduceMotion}
-                      onPress={setSelected}
+                      onPress={handleNodePress}
+                      isExpanded={
+                        n.toggleId != null
+                          ? expandedThemes.has(n.toggleId)
+                          : undefined
+                      }
                     />
                   ))}
                 </View>
@@ -931,7 +1243,7 @@ export function InnerSelfSheet({
               <View style={styles.statePad}>
                 <ActivityIndicator color={sheetAccent} />
               </View>
-            ) : memoryError ? (
+            ) : memoryError && facts.length === 0 ? (
               <View style={styles.statePad}>
                 <Feather
                   name="cloud-off"
@@ -941,8 +1253,24 @@ export function InnerSelfSheet({
                 <Text style={styles.stateText}>
                   Couldn&apos;t recall just now.
                 </Text>
+                <Pressable
+                  onPress={() => setMemoryAttempt((a) => a + 1)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Try again"
+                  testID="retry-memory"
+                  style={({ pressed }) => [
+                    styles.retryBtn,
+                    { borderColor: hexA(sheetAccent, 0.55) },
+                    pressed ? { opacity: 0.7 } : null,
+                  ]}
+                >
+                  <Feather name="refresh-cw" size={13} color={sheetAccent} />
+                  <Text style={[styles.retryText, { color: sheetAccent }]}>
+                    Try again
+                  </Text>
+                </Pressable>
               </View>
-            ) : !memory ? (
+            ) : !memory && facts.length === 0 ? (
               <View style={styles.statePad}>
                 <Feather
                   name="book-open"
@@ -963,13 +1291,332 @@ export function InnerSelfSheet({
                 ]}
                 showsVerticalScrollIndicator={false}
               >
-                <View style={styles.memoryCard}>
-                  <Text style={styles.memoryText}>{memory}</Text>
-                </View>
-                <Text style={styles.memoryFootnote}>
-                  A gentle recap Empiri keeps so our longer talks stay
-                  connected.
-                </Text>
+                {memory ? (
+                  <>
+                    {memoryEditing ? (
+                      <View style={styles.memoryCard}>
+                        <TextInput
+                          value={memoryDraft}
+                          onChangeText={setMemoryDraft}
+                          multiline
+                          autoFocus
+                          editable={!memorySaving}
+                          maxLength={2000}
+                          style={styles.memoryInput}
+                          placeholder={`What should ${name} remember?`}
+                          placeholderTextColor="rgba(255,255,255,0.35)"
+                          testID="memory-edit-input"
+                        />
+                        <View style={styles.memoryActionRow}>
+                          <Pressable
+                            onPress={cancelMemoryEdit}
+                            disabled={memorySaving}
+                            accessibilityRole="button"
+                            accessibilityLabel="Cancel editing"
+                            testID="memory-edit-cancel"
+                            style={({ pressed }) => [
+                              styles.memoryBtn,
+                              { opacity: pressed || memorySaving ? 0.6 : 1 },
+                            ]}
+                          >
+                            <Text style={styles.memoryBtnText}>Cancel</Text>
+                          </Pressable>
+                          <Pressable
+                            onPress={saveMemoryEdit}
+                            disabled={memorySaving}
+                            accessibilityRole="button"
+                            accessibilityLabel="Save memory"
+                            testID="memory-edit-save"
+                            style={({ pressed }) => [
+                              styles.memoryBtn,
+                              styles.memoryBtnPrimary,
+                              { opacity: pressed || memorySaving ? 0.7 : 1 },
+                            ]}
+                          >
+                            {memorySaving ? (
+                              <ActivityIndicator
+                                size="small"
+                                color="#0A0B12"
+                              />
+                            ) : (
+                              <Text style={styles.memoryBtnPrimaryText}>
+                                Save
+                              </Text>
+                            )}
+                          </Pressable>
+                        </View>
+                      </View>
+                    ) : (
+                      <>
+                        <View style={styles.memoryCard}>
+                          <Text style={styles.memoryText} testID="memory-text">
+                            {memory}
+                          </Text>
+                        </View>
+                        {memoryConfirmClear ? (
+                          <View style={styles.memoryActionRow}>
+                            <Text style={styles.memoryConfirmText}>
+                              Forget all of this?
+                            </Text>
+                            <Pressable
+                              onPress={() => setMemoryConfirmClear(false)}
+                              disabled={memorySaving}
+                              accessibilityRole="button"
+                              accessibilityLabel="Keep this memory"
+                              testID="memory-clear-cancel"
+                              style={({ pressed }) => [
+                                styles.memoryBtn,
+                                { opacity: pressed || memorySaving ? 0.6 : 1 },
+                              ]}
+                            >
+                              <Text style={styles.memoryBtnText}>Keep</Text>
+                            </Pressable>
+                            <Pressable
+                              onPress={clearMemory}
+                              disabled={memorySaving}
+                              accessibilityRole="button"
+                              accessibilityLabel="Yes, forget it"
+                              testID="memory-clear-confirm"
+                              style={({ pressed }) => [
+                                styles.memoryBtn,
+                                styles.memoryBtnDanger,
+                                { opacity: pressed || memorySaving ? 0.7 : 1 },
+                              ]}
+                            >
+                              {memorySaving ? (
+                                <ActivityIndicator
+                                  size="small"
+                                  color="#FFB4C0"
+                                />
+                              ) : (
+                                <Text style={styles.memoryBtnDangerText}>
+                                  Forget
+                                </Text>
+                              )}
+                            </Pressable>
+                          </View>
+                        ) : (
+                          <View style={styles.memoryActionRow}>
+                            <Pressable
+                              onPress={startMemoryEdit}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Edit what ${name} remembers`}
+                              testID="memory-edit"
+                              style={({ pressed }) => [
+                                styles.memoryBtn,
+                                { opacity: pressed ? 0.6 : 1 },
+                              ]}
+                            >
+                              <Feather
+                                name="edit-2"
+                                size={12}
+                                color="rgba(231,233,245,0.85)"
+                              />
+                              <Text style={styles.memoryBtnText}>Edit</Text>
+                            </Pressable>
+                            <Pressable
+                              onPress={() => {
+                                setMemoryActionError(null);
+                                setMemoryConfirmClear(true);
+                              }}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Forget what ${name} remembers`}
+                              testID="memory-clear"
+                              style={({ pressed }) => [
+                                styles.memoryBtn,
+                                { opacity: pressed ? 0.6 : 1 },
+                              ]}
+                            >
+                              <Feather
+                                name="trash-2"
+                                size={12}
+                                color="rgba(231,233,245,0.85)"
+                              />
+                              <Text style={styles.memoryBtnText}>Forget</Text>
+                            </Pressable>
+                          </View>
+                        )}
+                      </>
+                    )}
+                    {memoryActionError ? (
+                      <Text
+                        style={styles.memoryActionErrorText}
+                        testID="memory-action-error"
+                      >
+                        {memoryActionError}
+                      </Text>
+                    ) : null}
+                    <Text style={styles.memoryFootnote}>
+                      {`A gentle recap ${name} keeps so our longer talks stay connected. You can correct it or ask ${name} to forget.`}
+                    </Text>
+                  </>
+                ) : null}
+
+                {/* Facts section — shown whether empty or not once the self has loaded */}
+                {self != null ? (
+                  <>
+                    <Text
+                      style={[
+                        styles.factsTitle,
+                        memory != null && styles.factsTitleSpaced,
+                      ]}
+                    >
+                      LITTLE THINGS I&apos;VE PICKED UP
+                    </Text>
+                    {facts.length === 0 ? (
+                      <Text
+                        style={styles.factsEmptyText}
+                        testID="facts-empty"
+                      >
+                        Nothing yet — as we keep chatting, little things
+                        you share will appear here.
+                      </Text>
+                    ) : (
+                      <>
+                        <View style={styles.factsCard} testID="facts-card">
+                          {facts.map((fact, index) => (
+                            <View key={fact.key}>
+                              <View
+                                style={[
+                                  styles.factRow,
+                                  index > 0 && styles.factRowDivider,
+                                ]}
+                              >
+                                <View
+                                  style={[
+                                    styles.factDot,
+                                    {
+                                      backgroundColor: sheetAccent,
+                                      opacity:
+                                        0.35 +
+                                        0.65 *
+                                          Math.max(
+                                            0,
+                                            Math.min(1, fact.salience / 100),
+                                          ),
+                                    },
+                                  ]}
+                                />
+                                <Text style={styles.factText}>{fact.text}</Text>
+                                <Pressable
+                                  onPress={() =>
+                                    confirmDeleteFactKey === fact.key
+                                      ? cancelFactDelete()
+                                      : confirmFactDelete(fact.key)
+                                  }
+                                  disabled={deletingFactKey != null}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={
+                                    confirmDeleteFactKey === fact.key
+                                      ? "Cancel"
+                                      : `Forget this — ${fact.text}`
+                                  }
+                                  testID={`fact-delete-${fact.key}`}
+                                  hitSlop={10}
+                                  style={({ pressed }) => [
+                                    styles.factDeleteBtn,
+                                    {
+                                      opacity:
+                                        pressed ||
+                                        deletingFactKey === fact.key
+                                          ? 0.35
+                                          : deletingFactKey != null
+                                            ? 0.3
+                                            : 0.65,
+                                    },
+                                  ]}
+                                >
+                                  {deletingFactKey === fact.key ? (
+                                    <ActivityIndicator
+                                      size="small"
+                                      color="rgba(231,233,245,0.7)"
+                                    />
+                                  ) : (
+                                    <Feather
+                                      name="x"
+                                      size={15}
+                                      color="rgba(231,233,245,0.9)"
+                                    />
+                                  )}
+                                </Pressable>
+                              </View>
+                              {confirmDeleteFactKey === fact.key ? (
+                                <View
+                                  style={styles.factConfirmRow}
+                                  testID={`fact-confirm-${fact.key}`}
+                                >
+                                  <Text style={styles.memoryConfirmText}>
+                                    Forget this?
+                                  </Text>
+                                  <Pressable
+                                    onPress={cancelFactDelete}
+                                    disabled={deletingFactKey != null}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Keep this"
+                                    testID={`fact-confirm-keep-${fact.key}`}
+                                    style={({ pressed }) => [
+                                      styles.memoryBtn,
+                                      {
+                                        opacity:
+                                          pressed || deletingFactKey != null
+                                            ? 0.6
+                                            : 1,
+                                      },
+                                    ]}
+                                  >
+                                    <Text style={styles.memoryBtnText}>
+                                      Keep
+                                    </Text>
+                                  </Pressable>
+                                  <Pressable
+                                    onPress={() => deleteFact(fact.key)}
+                                    disabled={deletingFactKey != null}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Yes, forget it"
+                                    testID={`fact-confirm-forget-${fact.key}`}
+                                    style={({ pressed }) => [
+                                      styles.memoryBtn,
+                                      styles.memoryBtnDanger,
+                                      {
+                                        opacity:
+                                          pressed || deletingFactKey != null
+                                            ? 0.7
+                                            : 1,
+                                      },
+                                    ]}
+                                  >
+                                    {deletingFactKey === fact.key ? (
+                                      <ActivityIndicator
+                                        size="small"
+                                        color="#FFB4C0"
+                                      />
+                                    ) : (
+                                      <Text style={styles.memoryBtnDangerText}>
+                                        Forget
+                                      </Text>
+                                    )}
+                                  </Pressable>
+                                </View>
+                              ) : null}
+                            </View>
+                          ))}
+                        </View>
+                        {factDeleteError ? (
+                          <Text
+                            style={styles.memoryActionErrorText}
+                            testID="fact-delete-error"
+                          >
+                            {factDeleteError}
+                          </Text>
+                        ) : null}
+                        <Text style={styles.memoryFootnote}>
+                          Little things you&apos;ve shared — the ones we return
+                          to stay the brightest.
+                        </Text>
+                      </>
+                    )}
+                  </>
+                ) : null}
               </ScrollView>
             )}
           </>
@@ -980,6 +1627,7 @@ export function InnerSelfSheet({
           <>
             <Pressable
               style={styles.detailBackdrop}
+              testID="detail-backdrop"
               onPress={() => setSelected(null)}
             />
             <Animated.View
@@ -1170,6 +1818,21 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.5)",
     textAlign: "center",
   },
+  retryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    marginTop: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  retryText: {
+    fontFamily: FONTS.semibold,
+    fontSize: 13,
+    letterSpacing: 0.3,
+  },
   scroll: {
     flex: 1,
   },
@@ -1195,6 +1858,74 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     color: "rgba(231,233,245,0.92)",
   },
+  memoryInput: {
+    fontFamily: FONTS.regular,
+    fontSize: 15.5,
+    lineHeight: 24,
+    color: "rgba(231,233,245,0.92)",
+    minHeight: 120,
+    textAlignVertical: "top",
+    padding: 0,
+  },
+  memoryActionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 10,
+    marginTop: 12,
+  },
+  memoryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+    backgroundColor: "rgba(255,255,255,0.05)",
+  },
+  memoryBtnText: {
+    fontFamily: FONTS.semibold,
+    fontSize: 13,
+    color: "rgba(231,233,245,0.85)",
+  },
+  memoryBtnPrimary: {
+    borderColor: "rgba(231,233,245,0.9)",
+    backgroundColor: "#E7E9F5",
+    minWidth: 72,
+    justifyContent: "center",
+  },
+  memoryBtnPrimaryText: {
+    fontFamily: FONTS.semibold,
+    fontSize: 13,
+    color: "#0A0B12",
+  },
+  memoryBtnDanger: {
+    borderColor: "rgba(255,126,150,0.5)",
+    backgroundColor: "rgba(255,126,150,0.12)",
+    minWidth: 82,
+    justifyContent: "center",
+  },
+  memoryBtnDangerText: {
+    fontFamily: FONTS.semibold,
+    fontSize: 13,
+    color: "#FFB4C0",
+  },
+  memoryConfirmText: {
+    flex: 1,
+    fontFamily: FONTS.medium,
+    fontSize: 13.5,
+    color: "rgba(255,255,255,0.65)",
+  },
+  memoryActionErrorText: {
+    fontFamily: FONTS.medium,
+    fontSize: 12.5,
+    lineHeight: 18,
+    color: "#FFB4C0",
+    marginTop: 10,
+    textAlign: "center",
+  },
   memoryFootnote: {
     fontFamily: FONTS.regular,
     fontSize: 12.5,
@@ -1203,6 +1934,73 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 16,
     paddingHorizontal: 12,
+  },
+  factsTitle: {
+    fontFamily: FONTS.semibold,
+    fontSize: 11.5,
+    letterSpacing: 2,
+    color: "rgba(255,255,255,0.55)",
+    marginBottom: 10,
+    paddingHorizontal: 2,
+  },
+  factsTitleSpaced: {
+    marginTop: 26,
+  },
+  factsCard: {
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    paddingHorizontal: 18,
+    paddingVertical: 6,
+  },
+  factRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+  },
+  factRowDivider: {
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.08)",
+  },
+  factDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 12,
+  },
+  factText: {
+    flex: 1,
+    fontFamily: FONTS.regular,
+    fontSize: 14.5,
+    lineHeight: 21,
+    color: "rgba(231,233,245,0.92)",
+  },
+  factDeleteBtn: {
+    width: 28,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 6,
+  },
+  factsEmptyText: {
+    fontFamily: FONTS.regular,
+    fontSize: 13.5,
+    lineHeight: 20,
+    color: "rgba(231,233,245,0.45)",
+    marginTop: 8,
+    paddingHorizontal: 2,
+  },
+  factConfirmRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    backgroundColor: "rgba(255,180,192,0.06)",
+    borderRadius: 8,
+    marginTop: 2,
+    marginBottom: 4,
   },
   node: {
     position: "absolute",

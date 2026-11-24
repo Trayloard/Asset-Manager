@@ -7,6 +7,7 @@ import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Modal,
   Platform,
@@ -31,6 +32,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AmbientGlow } from "@/components/AmbientGlow";
 import { ChatInput } from "@/components/ChatInput";
+import { ChatSwitcherSheet } from "@/components/ChatSwitcherSheet";
 import { CheckInSettingsSheet } from "@/components/CheckInSettingsSheet";
 import { CompanionOrb } from "@/components/CompanionOrb";
 import { InnerSelfSheet } from "@/components/InnerSelfSheet";
@@ -128,22 +130,35 @@ export default function CompanionScreen() {
     mood,
     conversationId,
     conversationTitle,
+    chats,
+    refreshChats,
+    openConversation,
+    startNewChat,
     renameConversation,
+    deleteConversation,
     initializing,
     initError,
     error,
     failedTurn,
     isRecording,
+    isCallActive,
+    micVolumeRef,
     settings,
     sendText,
     retryMessage,
     startListening,
     stopListening,
+    startCall,
+    endCall,
     toggleVoice,
     toggleNotifications,
     setCheckInCadence,
     quietHours,
     setQuietHours,
+    sensesEnabled,
+    toggleSenses,
+    pendingReflection,
+    dismissReflection,
     retryInit,
     dismissError,
     devTriggerCheckIn,
@@ -164,6 +179,12 @@ export default function CompanionScreen() {
   const primaryAccent = accentForWarmth(smoothWarmth, colors.primary, colors.spectrum);
   const [peekVisible, setPeekVisible] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
+  const [switcherVisible, setSwitcherVisible] = useState(false);
+
+  const openSwitcher = () => {
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSwitcherVisible(true);
+  };
 
   // Rename-chat modal state
   const [renameVisible, setRenameVisible] = useState(false);
@@ -244,7 +265,13 @@ export default function CompanionScreen() {
   const busy = status === "thinking" || status === "transcribing" || status === "speaking";
 
   const handleMic = () => {
+    // In call mode the loop manages recording; tapping the mic does nothing.
+    if (isCallActive) return;
     if (isRecording) stopListening(); else startListening();
+  };
+
+  const handleMicLongPress = () => {
+    startCall().catch(() => {});
   };
   const handleRetry = () => {
     if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -276,8 +303,21 @@ export default function CompanionScreen() {
 
   const handleSignOut = () => {
     if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setSettingsVisible(false);
-    signOut();
+    Alert.alert(
+      "Sign out?",
+      "You'll need to sign in again to continue your conversation.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Sign Out",
+          style: "destructive",
+          onPress: () => {
+            setSettingsVisible(false);
+            signOut();
+          },
+        },
+      ],
+    );
   };
 
   const handleDevCheckIn = () => {
@@ -320,6 +360,10 @@ export default function CompanionScreen() {
   }
 
   const orbStatusText = statusLabel(status, mood.label);
+  const companionName = settings?.companionName?.trim() || "Empiri";
+  const toneBadge = settings?.tone
+    ? settings.tone.charAt(0).toUpperCase() + settings.tone.slice(1)
+    : null;
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -329,26 +373,74 @@ export default function CompanionScreen() {
       <KeyboardAvoidingView style={styles.flex} behavior="padding" keyboardVerticalOffset={0}>
         {/* Chat — full height, top padding leaves room for status bar */}
         <View style={[styles.flex, { paddingTop: topPad + 4 }]}>
-          {/* Chat title header — tap the pencil (or the title) to rename */}
+          {/* Chat header — chats button opens the conversation switcher,
+              companion name + tone badge open Personalize, and the pencil
+              renames the current conversation */}
           {!initializing && !initError && conversationId != null ? (
-            <Pressable
-              onPress={openRename}
-              accessibilityRole="button"
-              accessibilityLabel="Rename this chat"
-              testID="chat-title"
-              style={({ pressed }) => [
-                styles.titleRow,
-                { opacity: pressed ? 0.6 : 1 },
-              ]}
-            >
-              <Text
-                style={[styles.titleText, { color: colors.foreground }]}
-                numberOfLines={1}
+            <View style={styles.headerRow}>
+              <Pressable
+                onPress={openSwitcher}
+                accessibilityRole="button"
+                accessibilityLabel="Switch chats"
+                testID="chat-switcher-button"
+                hitSlop={8}
+                style={({ pressed }) => [
+                  styles.switcherBtn,
+                  {
+                    backgroundColor: colors.glass,
+                    borderColor: colors.glassBorder,
+                    opacity: pressed ? 0.6 : 1,
+                  },
+                ]}
               >
-                {conversationTitle}
-              </Text>
-              <Feather name="edit-2" size={13} color={colors.mutedForeground} />
-            </Pressable>
+                <Feather name="message-square" size={15} color={colors.mutedForeground} />
+              </Pressable>
+              <Pressable
+                onPress={handlePersonalize}
+                accessibilityRole="button"
+                accessibilityLabel={`Personalize ${companionName}`}
+                testID="companion-header"
+                style={({ pressed }) => [
+                  styles.titlePressable,
+                  { opacity: pressed ? 0.6 : 1 },
+                ]}
+              >
+                <Text
+                  style={[styles.titleText, { color: colors.foreground }]}
+                  numberOfLines={1}
+                >
+                  {companionName}
+                </Text>
+                {toneBadge ? (
+                  <View
+                    style={[
+                      styles.toneBadge,
+                      { backgroundColor: `${accent}1E`, borderColor: `${accent}55` },
+                    ]}
+                    testID="tone-badge"
+                  >
+                    <Text style={[styles.toneBadgeText, { color: accent }]}>
+                      {toneBadge}
+                    </Text>
+                  </View>
+                ) : null}
+              </Pressable>
+              <Pressable
+                onPress={openRename}
+                accessibilityRole="button"
+                accessibilityLabel="Rename this chat"
+                testID="chat-title"
+                hitSlop={10}
+                style={({ pressed }) => [
+                  styles.renameIconBtn,
+                  { opacity: pressed ? 0.6 : 1 },
+                ]}
+              >
+                <Feather name="edit-2" size={13} color={colors.mutedForeground} />
+              </Pressable>
+              {/* Spacer mirrors the switcher button so the title stays centred */}
+              <View style={styles.switcherBtnSpacer} />
+            </View>
           ) : null}
           {initializing ? (
             <View style={styles.center}>
@@ -370,12 +462,45 @@ export default function CompanionScreen() {
               </Text>
             </View>
           ) : (
+            <>
+              {/* "While you were away" reflection card — shown when Empiri
+                  composed a thought during the user's absence. Dismissible;
+                  dismissal is persisted so the card stays gone after a restart. */}
+              {pendingReflection ? (
+                <View
+                  style={[
+                    styles.reflectionCard,
+                    {
+                      backgroundColor: `${accent}14`,
+                      borderColor: `${accent}30`,
+                    },
+                  ]}
+                >
+                  <View style={styles.reflectionHeader}>
+                    <Feather name="moon" size={12} color={accent} />
+                    <Text style={[styles.reflectionLabel, { color: accent }]}>
+                      While you were away
+                    </Text>
+                    <Pressable
+                      onPress={() => { dismissReflection().catch(() => {}); }}
+                      hitSlop={10}
+                      accessibilityLabel="Dismiss reflection"
+                      accessibilityRole="button"
+                    >
+                      <Feather name="x" size={14} color={accent} style={{ opacity: 0.7 }} />
+                    </Pressable>
+                  </View>
+                  <Text style={[styles.reflectionText, { color: colors.foreground }]}>
+                    {pendingReflection.thought}
+                  </Text>
+                </View>
+              ) : null}
             <FlatList
               data={reversed}
               inverted
               keyExtractor={(item: Message) => String(item.id)}
               renderItem={({ item }) => (
-                <MessageBubble role={item.role} content={item.content} />
+                <MessageBubble role={item.role} content={item.content} warmth={smoothWarmth} accent={accent} />
               )}
               ListHeaderComponent={
                 status === "thinking" || status === "transcribing" ? (
@@ -389,6 +514,7 @@ export default function CompanionScreen() {
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
             />
+            </>
           )}
         </View>
 
@@ -406,12 +532,47 @@ export default function CompanionScreen() {
 
         {/* Input + bottom nav */}
         <View style={{ paddingBottom: bottomPad }}>
+          {/* In-call bar — shown above input during an audio-call loop */}
+          {isCallActive ? (
+            <View style={styles.callBar}>
+              <View style={styles.callStatusRow}>
+                <Feather name="mic" size={14} color={accent} />
+                <Text style={[styles.callStatusText, { color: accent }]}>
+                  {status === "listening"
+                    ? "Listening…"
+                    : status === "transcribing"
+                      ? "Transcribing…"
+                      : status === "thinking"
+                        ? "Thinking…"
+                        : status === "speaking"
+                          ? "Speaking…"
+                          : "In call"}
+                </Text>
+              </View>
+              <Pressable
+                onPress={endCall}
+                accessibilityRole="button"
+                accessibilityLabel="End call"
+                testID="end-call-button"
+                style={({ pressed }) => [
+                  styles.endCallBtn,
+                  { backgroundColor: colors.destructive, opacity: pressed ? 0.75 : 1 },
+                ]}
+              >
+                <Feather name="phone-off" size={13} color="#fff" />
+                <Text style={styles.endCallText}>End call</Text>
+              </Pressable>
+            </View>
+          ) : null}
           <ChatInput
             onSend={sendText}
             onMicPress={handleMic}
+            onMicLongPress={handleMicLongPress}
             isRecording={isRecording}
+            isCallActive={isCallActive}
             busy={busy}
             warmth={smoothWarmth}
+            micVolumeRef={micVolumeRef}
           />
           {/* Nav row — replaces scattered corner buttons */}
           <View style={styles.navRow}>
@@ -484,6 +645,7 @@ export default function CompanionScreen() {
         conversationId={conversationId}
         onClose={() => setPeekVisible(false)}
         warmth={smoothWarmth}
+        companionName={companionName}
       />
 
       {/* Rename-chat modal */}
@@ -571,12 +733,32 @@ export default function CompanionScreen() {
         </Pressable>
       </Modal>
 
+      <ChatSwitcherSheet
+        visible={switcherVisible}
+        chats={chats}
+        activeId={conversationId}
+        onSelect={openConversation}
+        onNewChat={startNewChat}
+        onRenameActive={() => {
+          setSwitcherVisible(false);
+          openRename();
+        }}
+        onDeleteChat={deleteConversation}
+        onRefresh={() => {
+          refreshChats().catch(() => {});
+        }}
+        onClose={() => setSwitcherVisible(false)}
+        accent={accent}
+      />
+
       <CheckInSettingsSheet
         visible={settingsVisible}
         cadence={checkInCadence}
         onSelect={setCheckInCadence}
         quietHours={quietHours}
         onQuietHoursChange={setQuietHours}
+        sensesEnabled={sensesEnabled}
+        onSensesToggle={toggleSenses}
         onClose={() => setSettingsVisible(false)}
         accent={accent}
         onPersonalize={handlePersonalize}
@@ -610,19 +792,57 @@ const styles = StyleSheet.create({
   },
   listContent: { paddingVertical: 12 },
   // Chat title header
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingBottom: 2,
+  },
+  switcherBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  switcherBtnSpacer: {
+    width: 30,
+    height: 30,
+  },
   titleRow: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    paddingHorizontal: 48,
-    paddingBottom: 2,
+    paddingHorizontal: 8,
+  },
+  titlePressable: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexShrink: 1,
   },
   titleText: {
     fontSize: 15,
     fontFamily: FONTS.semibold,
     letterSpacing: -0.2,
-    maxWidth: "80%",
+    flexShrink: 1,
+  },
+  toneBadge: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  toneBadgeText: {
+    fontSize: 10.5,
+    fontFamily: FONTS.semibold,
+    letterSpacing: 0.3,
+  },
+  renameIconBtn: {
+    padding: 2,
   },
   // Rename modal
   renameBackdrop: {
@@ -676,6 +896,35 @@ const styles = StyleSheet.create({
     fontSize: 14.5,
     fontFamily: FONTS.semibold,
   },
+  // "While you were away" reflection card
+  reflectionCard: {
+    marginHorizontal: 14,
+    marginBottom: 6,
+    marginTop: 2,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  reflectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 6,
+  },
+  reflectionLabel: {
+    flex: 1,
+    fontSize: 11.5,
+    fontFamily: FONTS.semibold,
+    letterSpacing: 0.3,
+    textTransform: "uppercase",
+  },
+  reflectionText: {
+    fontSize: 14.5,
+    fontFamily: FONTS.regular,
+    lineHeight: 20,
+    fontStyle: "italic",
+  },
   errorBanner: {
     flexDirection: "row", alignItems: "center", gap: 8,
     marginHorizontal: 14, marginBottom: 4,
@@ -683,6 +932,37 @@ const styles = StyleSheet.create({
   },
   errorText: {
     flex: 1, color: "#fff", fontSize: 13.5, fontFamily: FONTS.medium,
+  },
+  // In-call bar (shown above ChatInput when audio-call mode is active)
+  callBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginHorizontal: 14,
+    marginBottom: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  callStatusRow: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+  },
+  callStatusText: {
+    fontSize: 13.5, fontFamily: FONTS.medium,
+  },
+  endCallBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+  },
+  endCallText: {
+    color: "#fff", fontSize: 13, fontFamily: FONTS.semibold,
   },
   // Bottom nav
   navRow: {

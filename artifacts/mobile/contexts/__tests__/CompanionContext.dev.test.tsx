@@ -5,7 +5,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 
 import {
-  companionCheckIn,
+  companionCheckInFull,
   createConversation,
   listMessages,
   type Message,
@@ -62,21 +62,8 @@ jest.mock("expo-notifications", () => ({
   SchedulableTriggerInputTypes: { TIME_INTERVAL: "timeInterval" },
 }));
 
-jest.mock("@workspace/api-client-react", () => ({
-  companionCheckIn: jest.fn(),
-  createConversation: jest.fn(),
-  devRegressSelf: jest.fn(),
-  fetchStream: jest.fn(),
-  getCompanionSettings: jest.fn().mockRejectedValue(new Error("not mocked")),
-  getConversation: jest.fn().mockRejectedValue(new Error("not mocked")),
-  listConversations: jest.fn().mockResolvedValue([]),
-  listMessages: jest.fn(),
-  renameConversation: jest.fn(),
-  sendMessage: jest.fn(),
-  synthesizeSpeech: jest.fn(),
-  transcribeAudio: jest.fn(),
-  updateCompanionSettings: jest.fn(),
-}));
+// Shared manual mock: see artifacts/mobile/__mocks__/@workspace/api-client-react.ts
+jest.mock("@workspace/api-client-react");
 
 // Sign the user in so the provider's auth gate passes and it initializes.
 jest.mock("@/lib/auth", () => ({
@@ -101,7 +88,7 @@ const mockCreateConversation =
 const mockListMessages =
   listMessages as jest.MockedFunction<typeof listMessages>;
 const mockCompanionCheckIn =
-  companionCheckIn as jest.MockedFunction<typeof companionCheckIn>;
+  companionCheckInFull as jest.MockedFunction<typeof companionCheckInFull>;
 const mockSchedule =
   Notifications.scheduleNotificationAsync as jest.MockedFunction<
     typeof Notifications.scheduleNotificationAsync
@@ -146,6 +133,8 @@ beforeEach(async () => {
     id: 1,
     title: "Empiri",
     createdAt: new Date("2026-06-12T00:00:00.000Z").toISOString(),
+    lastMessageText: null,
+    lastMessageAt: null,
   });
   // A fresh conversation: the companion is "just here", so the normal
   // time-based check-in would never fire on its own.
@@ -154,9 +143,10 @@ beforeEach(async () => {
 
 describe("CompanionContext dev shortcuts", () => {
   it("devTriggerCheckIn fires a greeting immediately, ignoring the time-away threshold", async () => {
-    mockCompanionCheckIn.mockResolvedValue(
-      makeMessage(2, "assistant", "Hey — just thinking of you!"),
-    );
+    mockCompanionCheckIn.mockResolvedValue({
+      ...makeMessage(2, "assistant", "Hey — just thinking of you!"),
+      reflectionThought: null,
+    });
 
     const { result } = await renderReadyCompanion();
 

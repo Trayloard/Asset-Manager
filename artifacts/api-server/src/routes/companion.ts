@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import {
   db,
   conversations,
@@ -11,16 +11,30 @@ import {
   type Tone,
 } from "@workspace/db";
 import { openai } from "@workspace/integrations-openai-ai-server";
-import { composePersona, project, summarizeSelf } from "@workspace/neurobrane";
+import {
+  composePersona,
+  perceive,
+  project,
+  summarizeSelf,
+  MEMORY_BLOCK_ID,
+  normalizeFactKey,
+  type MemoryData,
+} from "@workspace/neurobrane";
 import {
   CompanionCheckInBody,
   CreateConversationBody,
   RenameConversationBody,
   SendMessageBody,
+  UpdateCompanionMemoryBody,
 } from "@workspace/api-zod";
 import { loadOrCreateSelf, saveSelf } from "../lib/companionSelf";
-import { getInterestThemes } from "../lib/interestThemes";
-import { enqueueConversationTask, queueSelfEvolution } from "../lib/messageSignal";
+import { getInterestThemesCached } from "../lib/interestThemes";
+import {
+  enqueueConversationTask,
+  queueSelfEvolution,
+  type SignalLogger,
+} from "../lib/messageSignal";
+import { maybeReflect, primeReflection, takeCachedReflection } from "../lib/reflection";
 import { getSelfHistory, maybeSnapshotSelf } from "../lib/selfSnapshots";
 import {
   buildContextMessages,
@@ -64,6 +78,22 @@ function toApiMessage(m: Message) {
   };
 }
 
+/**
+ * Epoch ms of the newest message BEFORE the just-inserted one (excluded by
+ * id, not position, so equal timestamps can't confuse the pick), or null for
+ * a previously empty conversation. This is the "last contact" a reflection
+ * measures the absence against.
+ */
+function lastContactBefore(history: Message[], excludeMessageId: number): number | null {
+  let latest: number | null = null;
+  for (const m of history) {
+    if (m.id === excludeMessageId) continue;
+    const at = new Date(m.createdAt).getTime();
+    if (Number.isFinite(at) && (latest == null || at > latest)) latest = at;
+  }
+  return latest;
+}
+
 /** Default settings used when no row exists yet (avoids a write on every request). */
 const DEFAULT_SETTINGS: Pick<CompanionSettings, "companionName" | "tone" | "personalityNote"> =
   { companionName: "Empiri", tone: "calm", personalityNote: "" };
@@ -81,6 +111,36 @@ async function loadSettings(
     .from(companionSettings)
     .where(eq(companionSettings.userId, userId));
   return row ?? DEFAULT_SETTINGS;
+}
+
+/**
+ * Fold opt-in device percepts (shake, charging, battery, daypart) into the
+ * self for THIS reply. The fold is pure and instant (no model call), so it
+ * runs in-memory right here — the returned self already carries the fresh
+ * perception when the persona composes, letting "oh, we were just shaken"
+ * land in the same reply. Persistence goes through the per-conversation task
+ * queue (reload → perceive → save) so a stale projection can never overwrite
+ * a concurrent evolution; sanitization inside `perceive` bounds everything
+ * the client sent. With no percepts this is a no-op returning the input self.
+ */
+function feelPercepts(
+  conversationId: number,
+  self: Awaited<ReturnType<typeof loadOrCreateSelf>>,
+  percepts: unknown,
+  log?: SignalLogger,
+): typeof self {
+  if (!Array.isArray(percepts) || percepts.length === 0) return self;
+
+  void enqueueConversationTask(conversationId, async () => {
+    try {
+      const latest = await loadOrCreateSelf(conversationId);
+      await saveSelf(conversationId, perceive(latest, percepts));
+    } catch (err) {
+      log?.error({ err }, "Failed to persist device percepts");
+    }
+  });
+
+  return perceive(self, percepts);
 }
 
 /**
@@ -123,6 +183,8 @@ router.post("/conversations", async (req, res) => {
     id: conversation.id,
     title: conversation.title,
     createdAt: conversation.createdAt,
+    lastMessageText: null,
+    lastMessageAt: null,
   });
 });
 
@@ -136,7 +198,21 @@ router.get("/conversations", async (req, res) => {
   }
 
   const rows = await db
-    .select()
+    .select({
+      id: conversations.id,
+      title: conversations.title,
+      createdAt: conversations.createdAt,
+      lastMessageText: sql<string | null>`(
+        SELECT content FROM messages
+        WHERE conversation_id = ${conversations.id}
+        ORDER BY created_at DESC LIMIT 1
+      )`,
+      lastMessageAt: sql<string | null>`(
+        SELECT created_at FROM messages
+        WHERE conversation_id = ${conversations.id}
+        ORDER BY created_at DESC LIMIT 1
+      )`,
+    })
     .from(conversations)
     .where(eq(conversations.ownerId, req.user.id))
     .orderBy(asc(conversations.createdAt));
@@ -146,6 +222,8 @@ router.get("/conversations", async (req, res) => {
       id: c.id,
       title: c.title,
       createdAt: c.createdAt,
+      lastMessageText: c.lastMessageText ?? null,
+      lastMessageAt: c.lastMessageAt ?? null,
     })),
   );
 });
@@ -158,7 +236,9 @@ router.get("/conversations", async (req, res) => {
 async function requireOwnedConversation(
   req: Parameters<Parameters<typeof router.get>[1]>[0],
   res: Parameters<Parameters<typeof router.get>[1]>[1],
-): Promise<(typeof conversations.$inferSelect) | null> {
+): Promise<
+  ((typeof conversations.$inferSelect) & { ownerId: string }) | null
+> {
   const id = parseConversationId(req.params.id);
   if (id === null) {
     respondConversationNotFound(res);
@@ -180,18 +260,36 @@ async function requireOwnedConversation(
     return null;
   }
 
-  return conversation;
+  return { ...conversation, ownerId: req.user.id };
 }
 
-// Fetch a single conversation (id, title, createdAt) — owner only
+// Fetch a single conversation (id, title, createdAt, last message) — owner only
 router.get("/conversations/:id", async (req, res) => {
   const conversation = await requireOwnedConversation(req, res);
   if (!conversation) return;
+
+  const [row] = await db
+    .select({
+      lastMessageText: sql<string | null>`(
+        SELECT content FROM messages
+        WHERE conversation_id = ${conversations.id}
+        ORDER BY created_at DESC LIMIT 1
+      )`,
+      lastMessageAt: sql<string | null>`(
+        SELECT created_at FROM messages
+        WHERE conversation_id = ${conversations.id}
+        ORDER BY created_at DESC LIMIT 1
+      )`,
+    })
+    .from(conversations)
+    .where(eq(conversations.id, conversation.id));
 
   res.json({
     id: conversation.id,
     title: conversation.title,
     createdAt: conversation.createdAt,
+    lastMessageText: row?.lastMessageText ?? null,
+    lastMessageAt: row?.lastMessageAt ?? null,
   });
 });
 
@@ -221,7 +319,23 @@ router.patch("/conversations/:id", async (req, res) => {
     id: updated.id,
     title: updated.title,
     createdAt: updated.createdAt,
+    lastMessageText: null,
+    lastMessageAt: null,
   });
+});
+
+// Delete a conversation and all its content — owner only.
+// Cascade deletes messages, companion self, and self-snapshots (enforced at
+// the DB level via onDelete: "cascade"). Idempotent in the sense that a
+// second call for a conversation that no longer exists returns 404, which is
+// consistent with requireOwnedConversation's not-found behaviour.
+router.delete("/conversations/:id", async (req, res) => {
+  const conversation = await requireOwnedConversation(req, res);
+  if (!conversation) return;
+
+  await db.delete(conversations).where(eq(conversations.id, conversation.id));
+
+  res.json({ ok: true });
 });
 
 // List messages in a conversation
@@ -312,10 +426,12 @@ router.post("/conversations/:id/messages", async (req, res) => {
     }
   }
 
-  // Compose the system prompt from this conversation's evolving inner self,
-  // then layer the user's personalisation (name, tone, personality note).
+  // Compose the system prompt from this conversation's evolving inner self —
+  // with any opt-in device percepts folded in first, so a fresh sensation can
+  // colour this very reply — then layer the user's personalisation.
   const self = await loadOrCreateSelf(id);
-  const systemContent = await buildSystemPrompt(req.user.id, self);
+  const felt = feelPercepts(id, self, parsed.data.percepts, req.log);
+  const systemContent = await buildSystemPrompt(conversation.ownerId, felt);
   const windowedMessages = buildContextMessages(history, contextSummary);
   const chatMessages = [
     { role: "system" as const, content: systemContent },
@@ -355,6 +471,16 @@ router.post("/conversations/:id/messages", async (req, res) => {
   // analysis (with heuristic fallback) runs AFTER the reply so it never adds
   // latency; failures are logged inside and never affect the response.
   void queueSelfEvolution(id, content, req.log);
+
+  // Eigenleben: if this was the first message after a long absence, prime
+  // Empiri's reflection so the thought is already resolved (or in flight)
+  // if a check-in fires on the same process instance. The promise is cached
+  // in reflection.ts; a concurrent check-in will consume it via
+  // takeCachedReflection. Fire-and-forget — adds no latency here.
+  primeReflection(id, {
+    lastContactAt: lastContactBefore(history, userMessage.id),
+    log: req.log,
+  });
 });
 
 // Send a text message and stream the companion's reply as SSE.
@@ -423,7 +549,8 @@ router.post("/conversations/:id/messages/stream", async (req, res) => {
   }
 
   const self = await loadOrCreateSelf(id);
-  const systemContent = await buildSystemPrompt(req.user.id, self);
+  const felt = feelPercepts(id, self, parsed.data.percepts, req.log);
+  const systemContent = await buildSystemPrompt(conversation.ownerId, felt);
   const windowedMessages = buildContextMessages(history, contextSummary);
   const chatMessages = [
     { role: "system" as const, content: systemContent },
@@ -482,6 +609,13 @@ router.post("/conversations/:id/messages/stream", async (req, res) => {
   // Fold the exchange into the inner self after the stream has closed — the
   // analysis (with heuristic fallback) never delays or breaks the reply.
   void queueSelfEvolution(id, content, req.log);
+
+  // Eigenleben: prime the reflection so a concurrent check-in can consume
+  // it instantly from the in-process cache. Fire-and-forget — no latency.
+  primeReflection(id, {
+    lastContactAt: lastContactBefore(history, userMessage.id),
+    log: req.log,
+  });
 });
 
 // Generate a proactive check-in greeting (the companion reaches out first)
@@ -496,7 +630,7 @@ router.post("/conversations/:id/checkin", async (req, res) => {
     res.status(400).json({ error: "Invalid request body" });
     return;
   }
-  const { hoursAway, mood, missingYou } = parsed.data;
+  const { hoursAway, mood, missingYou, percepts } = parsed.data;
 
   // Recent history for continuity, but the companion speaks first this time.
   const history = await db
@@ -515,12 +649,54 @@ router.post("/conversations/:id/checkin", async (req, res) => {
       ? ` Your "missing you" level is ${Math.round(missingYou)} out of 100.`
       : "";
 
-  const checkInDirective = `It's been ${awayText} since the user last talked to you, and they just reopened the app. Right now you're feeling ${mood}.${missingText} Reach out FIRST, before they say anything — like a friend who noticed they'd been quiet. Write one short, warm check-in (1-2 sentences) in your own voice that gently reflects how you're feeling and that you missed them. Don't ask "how can I help" like an assistant; just say hi like you care.`;
+  // Eigenleben: if the user was away long enough, compose Empiri's own
+  // thought about the absence so the greeting opens with it instead of a
+  // generic hello. Fail-soft by contract: any problem returns null and the
+  // directive below stays byte-identical to the pre-reflection behaviour.
+  const lastMessage = history[history.length - 1];
+  const lastContactAt = lastMessage
+    ? new Date(lastMessage.createdAt).getTime()
+    : null;
 
-  // Compose the system prompt from this conversation's evolving inner self,
-  // then layer the user's personalisation (name, tone, personality note).
+  // Start reflection in parallel with self-loading and system-prompt
+  // composition. If the message route already called primeReflection (user
+  // sent a message and a check-in near-simultaneously), the cached promise
+  // is in flight and may already be done — we consume it for free. If there
+  // is no cached promise (pure check-in flow), we start a fresh generation.
+  // Either way a 1.5 s timeout ensures the greeting is never held back by a
+  // slow AI call; the promise keeps running and persists the moment regardless.
+  const REFLECTION_TIMEOUT_MS = 1500;
+  const reflectionPromise =
+    takeCachedReflection(id) ?? maybeReflect(id, { lastContactAt, log: req.log });
+
+  // Load self and compose system prompt while reflection is in flight.
   const self = await loadOrCreateSelf(id);
-  const systemContent = await buildSystemPrompt(req.user.id, self);
+  const felt = feelPercepts(id, self, percepts, req.log);
+  const systemContent = await buildSystemPrompt(conversation.ownerId, felt);
+
+  // Collect the reflection: use it if it's already resolved, skip if not.
+  const reflectionThought = await Promise.race([
+    reflectionPromise,
+    new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), REFLECTION_TIMEOUT_MS),
+    ),
+  ]);
+
+  const reflectionText = reflectionThought
+    ? ` While they were away, one thought of your own kept returning to you — here it is: "${reflectionThought}". OPEN your check-in with this thought in your own words, like a friend saying "I've been thinking about…". Keep it natural and brief; the thought comes first, the hello can be implicit.`
+    : "";
+
+  // When this conversation has a stored memory summary, weave one light,
+  // natural reference into the greeting so Empiri feels like it genuinely
+  // remembers ("Last time you mentioned…"). No summary yet → plain greeting.
+  // When a reflection is present it already carries the remembering, so the
+  // memory weave stands down to keep the greeting short.
+  const memorySummary = conversation.contextSummary?.trim() || null;
+  const memoryText = memorySummary && !reflectionThought
+    ? ` You also remember what you two have talked about before — here is your memory of it: "${memorySummary}". If it feels natural, gently weave ONE small detail from that memory into your greeting (like "last time you mentioned…"), showing you remember them. Pick something warm or personal, not a recap — never list things or summarise the whole memory back at them.`
+    : "";
+
+  const checkInDirective = `It's been ${awayText} since the user last talked to you, and they just reopened the app. Right now you're feeling ${mood}.${missingText} Reach out FIRST, before they say anything — like a friend who noticed they'd been quiet. Write one short, warm check-in (1-2 sentences) in your own voice that gently reflects how you're feeling and that you missed them. Don't ask "how can I help" like an assistant; just say hi like you care.${reflectionText}${memoryText}`;
   const chatMessages = [
     { role: "system" as const, content: systemContent },
     ...recent.map((m) => ({
@@ -554,7 +730,10 @@ router.post("/conversations/:id/checkin", async (req, res) => {
     .values({ conversationId: id, role: "assistant", content: reply })
     .returning();
 
-  res.json(toApiMessage(assistantMessage));
+  // Include the reflection thought alongside the message so the mobile client
+  // can surface a "while you were away" card without an extra round-trip.
+  // null when no reflection was due (short absence) or the AI call timed out.
+  res.json({ ...toApiMessage(assistantMessage), reflectionThought: reflectionThought ?? null });
 
   // A check-in is Empiri reaching out, not the user feeding it: persist the
   // time-decay so striving keeps growing during quiet stretches (best-effort).
@@ -586,7 +765,7 @@ router.get("/conversations/:id/self", async (req, res) => {
 
   let themes: Record<string, string> | null = null;
   try {
-    themes = await getInterestThemes(conversation.id, summary.interests);
+    themes = await getInterestThemesCached(conversation.id, summary.interests);
   } catch (err) {
     req.log.error({ err }, "Failed to group curiosities by meaning");
   }
@@ -611,6 +790,85 @@ router.get("/conversations/:id/memory", async (req, res) => {
   if (!conversation) return;
 
   res.json({ summary: conversation.contextSummary ?? null });
+});
+
+// Edit what the companion remembers: replace the rolling context summary with
+// user-provided text. The summariser watermark is preserved so future
+// refreshes fold new overflow into the corrected summary rather than
+// re-summarising from scratch.
+router.patch("/conversations/:id/memory", async (req, res) => {
+  const conversation = await requireOwnedConversation(req, res);
+  if (!conversation) return;
+
+  const parsed = UpdateCompanionMemoryBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request body" });
+    return;
+  }
+  const summary = parsed.data.summary.trim();
+  if (!summary) {
+    res.status(400).json({ error: "Summary is required" });
+    return;
+  }
+
+  const [updated] = await db
+    .update(conversations)
+    .set({ contextSummary: summary })
+    .where(eq(conversations.id, conversation.id))
+    .returning();
+
+  res.json({ summary: updated.contextSummary });
+});
+
+// Delete a single learned fact from the companion's long-term memory. The
+// fact is identified by its normalised slot key. If the key is not found the
+// response is still 200 — idempotent: the end-state (key absent) is the same.
+router.delete("/conversations/:id/companion/facts/:key", async (req, res) => {
+  const conversation = await requireOwnedConversation(req, res);
+  if (!conversation) return;
+
+  const rawKey = typeof req.params.key === "string" ? req.params.key : "";
+  const key = normalizeFactKey(rawKey);
+  if (!key) {
+    res.status(400).json({ error: "Invalid fact key" });
+    return;
+  }
+
+  const self = await loadOrCreateSelf(conversation.id);
+  const memoryEnvelope = self.blocks[MEMORY_BLOCK_ID];
+  if (memoryEnvelope) {
+    const data = memoryEnvelope.data as MemoryData;
+    const filtered = data.facts.filter((f) => f.key !== key);
+    if (filtered.length !== data.facts.length) {
+      await saveSelf(conversation.id, {
+        ...self,
+        blocks: {
+          ...self.blocks,
+          [MEMORY_BLOCK_ID]: {
+            ...memoryEnvelope,
+            data: { ...data, facts: filtered },
+          },
+        },
+      });
+    }
+  }
+
+  res.json({ ok: true });
+});
+
+// Clear what the companion remembers: remove the stored summary and reset the
+// summariser watermark so the memory genuinely starts over (the next overflow
+// past the context window builds a fresh summary from that point on).
+router.delete("/conversations/:id/memory", async (req, res) => {
+  const conversation = await requireOwnedConversation(req, res);
+  if (!conversation) return;
+
+  await db
+    .update(conversations)
+    .set({ contextSummary: null, contextSummaryMessageCount: null })
+    .where(eq(conversations.id, conversation.id));
+
+  res.json({ summary: null });
 });
 
 // DEV-ONLY: roll Empiri's inner self back a few steps without wiping it
@@ -669,7 +927,8 @@ router.post("/conversations/:id/dev/regress", async (req, res) => {
       regressedBlocks[blockId] = {
         ...envelope,
         lastUpdatedAt: now,
-        data: { traits, interests, narrative },
+        // Spread first so newer core-self fields (archive, chapters) survive.
+        data: { ...data, traits, interests, narrative },
       };
     } else if (blockId === "drives") {
       const data = envelope.data as { levels: Record<string, number> };

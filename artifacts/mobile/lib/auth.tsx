@@ -1,11 +1,12 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
 import * as AuthSession from "expo-auth-session";
+import * as Crypto from "expo-crypto";
 import * as WebBrowser from "expo-web-browser";
 import * as SecureStore from "expo-secure-store";
 
 WebBrowser.maybeCompleteAuthSession();
 
-const AUTH_TOKEN_KEY = "auth_session_token";
+export const AUTH_TOKEN_KEY = "auth_session_token";
 const ISSUER_URL = process.env.EXPO_PUBLIC_ISSUER_URL ?? "https://replit.com/oidc";
 
 interface User {
@@ -22,6 +23,7 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   login: () => Promise<void>;
   logout: () => Promise<void>;
+  deleteAccount: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue>({
@@ -30,6 +32,7 @@ const AuthContext = createContext<AuthContextValue>({
   isAuthenticated: false,
   login: async () => {},
   logout: async () => {},
+  deleteAccount: async () => {},
 });
 
 function getApiBaseUrl(): string {
@@ -51,12 +54,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const redirectUri = AuthSession.makeRedirectUri();
 
+  const nonce = useMemo(() => Crypto.randomUUID(), []);
+
   const [request, response, promptAsync] = AuthSession.useAuthRequest(
     {
       clientId: getClientId(),
       scopes: ["openid", "email", "profile", "offline_access"],
       redirectUri,
       prompt: AuthSession.Prompt.Login,
+      extraParams: { nonce },
     },
     discovery,
   );
@@ -114,7 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             code_verifier: request.codeVerifier,
             redirect_uri: redirectUri,
             state,
-            nonce: request.nonce,
+            nonce,
           }),
         });
 
@@ -135,7 +141,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsLoading(false);
       }
     })();
-  }, [response, request, redirectUri, fetchUser]);
+  }, [response, request, redirectUri, fetchUser, nonce]);
 
   const login = useCallback(async () => {
     try {
@@ -162,6 +168,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const deleteAccount = useCallback(async () => {
+    const token = await SecureStore.getItemAsync(AUTH_TOKEN_KEY);
+    if (token) {
+      const apiBase = getApiBaseUrl();
+      const res = await fetch(`${apiBase}/api/account`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        throw new Error(`Account deletion failed (${res.status})`);
+      }
+    }
+    // Only clear local credentials once the server has confirmed deletion, so
+    // a failed request never makes the user think their account is gone.
+    await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
+    setUser(null);
+  }, []);
+
   return (
     <AuthContext.Provider
       value={{
@@ -170,6 +194,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!user,
         login,
         logout,
+        deleteAccount,
       }}
     >
       {children}

@@ -41,6 +41,48 @@ export interface InteractionSignal {
   topicWeights?: Record<string, number>;
   /** External affect multiplier (e.g. derived from client mood); 1 = neutral. */
   moodFactor: number;
+  /**
+   * Optional durable personal facts the turn stated about the user (e.g.
+   * "Their dog is called Milo"). Produced only by richer extractors (the
+   * language-model analysis); heuristic signals never carry facts, so the
+   * memory block simply doesn't grow when analysis is unavailable.
+   */
+  facts?: FactCandidate[];
+  /**
+   * Optional device percepts riding along with this fold (already sanitized).
+   * Only the senses block consumes them; every other block ignores the field.
+   */
+  percepts?: Percept[];
+}
+
+/**
+ * One extracted fact candidate. The `key` is a stable slot identifier (e.g.
+ * "dog_name", "job") — a later mention with the same key REPLACES the stored
+ * text, which is how contradictions ("I got a new job") update instead of
+ * duplicating. `confidence` (0..1) scales how strongly the fact seeds/refreshes.
+ */
+export interface FactCandidate {
+  key: string;
+  text: string;
+  confidence: number;
+}
+
+/** The device "senses" a percept can come from. Deliberately coarse — no
+ * location, no microphone, no health data. */
+export type PerceptKind = "shake" | "charging" | "battery_low" | "daypart";
+
+/**
+ * One gentle moment of device perception, reported by the client with the
+ * user's consent (opt-in). `intensity` (0..1) is how salient the moment felt;
+ * `at` is when it happened (epoch ms, client clock — sanitized server-side).
+ * `detail` carries an optional qualifier such as the daypart bucket
+ * ("early_morning", "late_night").
+ */
+export interface Percept {
+  kind: PerceptKind;
+  intensity: number;
+  at: NowMs;
+  detail?: string;
 }
 
 /**
@@ -174,6 +216,58 @@ export interface NeuroParams {
       /** Affinity at which a new interest earns a narrative line. */
       newInterestThreshold: number;
     };
+    biography: {
+      /**
+       * Maximum overflowed narrative lines held in the archive awaiting
+       * condensation; beyond this the oldest are dropped (the pre-biography
+       * behavior, so storage stays bounded even when AI is unavailable).
+       */
+      archiveMax: number;
+      /** Archive size at which a condensation run becomes due. */
+      condenseThreshold: number;
+      /** Maximum number of chapters kept (oldest dropped beyond this). */
+      maxChapters: number;
+      /** Maximum number of chapters woven into the persona at once. */
+      personaChapters: number;
+    };
+  };
+  senses: {
+    /** Maximum recent percepts retained (oldest dropped beyond this). */
+    maxRecent: number;
+    /** Minutes a percept stays "fresh"; older ones are pruned on decay. */
+    freshWindowMinutes: number;
+    /** Intensity (0..1) at/above which a fresh percept surfaces in the persona. */
+    surfaceThreshold: number;
+    /** Intensity a repeat percept is dampened to while its kind is throttled. */
+    dampenedIntensity: number;
+    /** Per-kind minutes before the same kind may be offered to the persona again. */
+    voiceThrottleMinutes: Record<string, number>;
+    /** Fallback throttle (minutes) for kinds missing from the map above. */
+    defaultThrottleMinutes: number;
+    /** Maximum percepts accepted per fold (sanitization cap). */
+    maxPerFold: number;
+    /** Percepts older than this many hours are rejected as stale. */
+    maxStaleHours: number;
+    /** Master multiplier on the tiny drive nudges percepts produce. */
+    driveImpulseScale: number;
+  };
+  memory: {
+    /** Maximum number of facts kept (lowest-salience evicted). */
+    maxCount: number;
+    /** Base salience a freshly learned fact starts at (before confidence). */
+    seedSalienceBase: number;
+    /** Extra salience added per unit of extraction confidence. */
+    seedSaliencePerConfidence: number;
+    /** Salience gained when an existing fact is mentioned again. */
+    refreshGain: number;
+    /** Salience lost per hour for every fact (gentle forgetting). */
+    decayPerHour: number;
+    /** Facts whose salience falls below this are forgotten entirely. */
+    dropBelow: number;
+    /** Salience above which a fact is woven into the persona. */
+    surfaceThreshold: number;
+    /** Maximum number of facts woven into the persona at once. */
+    personaCount: number;
   };
 }
 
@@ -193,6 +287,36 @@ export interface InterestSummary {
   /** Best original casing for the topic (proper-noun aware), for display. */
   display: string;
 }
+export interface FactSummary {
+  /** Stable slot identifier (e.g. "dog_name") — matching/replacement key. */
+  key: string;
+  /** The remembered statement, third-person ("Their dog is called Milo"). */
+  text: string;
+  /** How firmly the fact is held right now (0..100). */
+  salience: number;
+}
+/** @internal — read the field docs on {@link Chapter} */
+export interface ChapterSummary {
+  /** Epoch ms of the earliest moment the chapter covers. */
+  from: NowMs;
+  /** Epoch ms of the latest moment the chapter covers. */
+  to: NowMs;
+  /** The condensed chapter text, second person ("Back then you…"). */
+  text: string;
+  /** Core themes of the period (normalized topic keys, up to a few). */
+  themes: string[];
+  /**
+   * The raw narrative lines condensed into this chapter. Present only for
+   * chapters written after this field was introduced; older chapters omit it.
+   */
+  sourceLines?: string[];
+  /**
+   * Epoch ms of the earliest moment a memory in this chapter was originally
+   * written. Prefer this over `from` for user-facing date display. Absent for
+   * chapters written before this field was introduced; fall back to `from`.
+   */
+  memoryDate?: NowMs;
+}
 
 /** What a single block contributes to the friendly summary. */
 export interface BlockSummary {
@@ -200,6 +324,8 @@ export interface BlockSummary {
   traits?: TraitSummary[];
   interests?: InterestSummary[];
   narrative?: string[];
+  facts?: FactSummary[];
+  chapters?: ChapterSummary[];
 }
 
 /** The merged, read-only view of the whole inner self for the peek UI. */
@@ -208,6 +334,8 @@ export interface SelfSummary {
   traits: TraitSummary[];
   interests: InterestSummary[];
   narrative: string[];
+  facts: FactSummary[];
+  chapters: ChapterSummary[];
   interactions: number;
   ageHours: number;
 }

@@ -10,4 +10,8 @@ export interface Conversation {
   id: number;
   title: string;
   createdAt: Date;
+  /** @nullable */
+  lastMessageText?: string | null;
+  /** @nullable */
+  lastMessageAt?: Date | null;
 }

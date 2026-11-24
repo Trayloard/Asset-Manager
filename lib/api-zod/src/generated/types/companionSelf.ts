@@ -5,7 +5,9 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { CompanionChapter } from './companionChapter';
 import type { CompanionDrive } from './companionDrive';
+import type { CompanionFact } from './companionFact';
 import type { CompanionInterest } from './companionInterest';
 import type { CompanionSelfThemes } from './companionSelfThemes';
 import type { CompanionTrait } from './companionTrait';
@@ -15,6 +17,10 @@ export interface CompanionSelf {
   traits: CompanionTrait[];
   interests: CompanionInterest[];
   narrative: string[];
+  /** Durable personal facts the companion remembers about the user, most salient first. */
+  facts: CompanionFact[];
+  /** The condensed life story so far — dated chapters, oldest first. */
+  chapters: CompanionChapter[];
   interactions: number;
   ageHours: number;
   /**

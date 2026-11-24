@@ -4,9 +4,10 @@ import { act, renderHook, waitFor } from "@testing-library/react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import {
-  companionCheckIn,
+  companionCheckInFull,
   createConversation,
   getConversation,
+  listConversations,
   listMessages,
   renameConversation,
   sendMessage,
@@ -100,21 +101,8 @@ jest.mock("expo-notifications", () => ({
 }));
 
 // Fully mock the data client so we can drive success/failure deterministically.
-jest.mock("@workspace/api-client-react", () => ({
-  companionCheckIn: jest.fn(),
-  createConversation: jest.fn(),
-  devRegressSelf: jest.fn(),
-  fetchStream: jest.fn(),
-  getCompanionSettings: jest.fn().mockRejectedValue(new Error("not mocked")),
-  getConversation: jest.fn().mockRejectedValue(new Error("not mocked")),
-  listConversations: jest.fn().mockResolvedValue([]),
-  listMessages: jest.fn(),
-  renameConversation: jest.fn(),
-  sendMessage: jest.fn(),
-  synthesizeSpeech: jest.fn(),
-  transcribeAudio: jest.fn(),
-  updateCompanionSettings: jest.fn(),
-}));
+// Shared manual mock: see artifacts/mobile/__mocks__/@workspace/api-client-react.ts
+jest.mock("@workspace/api-client-react");
 
 const mockCreateConversation =
   createConversation as jest.MockedFunction<typeof createConversation>;
@@ -122,7 +110,7 @@ const mockListMessages =
   listMessages as jest.MockedFunction<typeof listMessages>;
 const mockSendMessage = sendMessage as jest.MockedFunction<typeof sendMessage>;
 const mockCompanionCheckIn =
-  companionCheckIn as jest.MockedFunction<typeof companionCheckIn>;
+  companionCheckInFull as jest.MockedFunction<typeof companionCheckInFull>;
 
 function makeMessage(
   id: number,
@@ -159,6 +147,8 @@ beforeEach(async () => {
     id: 1,
     title: "Empiri",
     createdAt: new Date("2026-06-12T00:00:00.000Z").toISOString(),
+    lastMessageText: null,
+    lastMessageAt: null,
   });
   mockListMessages.mockResolvedValue([]);
 });
@@ -344,6 +334,127 @@ describe("CompanionContext failed-reply handling", () => {
   });
 });
 
+describe("CompanionContext sad-mood arc", () => {
+  it("turns sad when the reply fails, then recovers to a computed mood after a successful reply", async () => {
+    mockSendMessage.mockRejectedValueOnce(new Error("AI unavailable"));
+    mockSendMessage.mockResolvedValueOnce({
+      userMessage: makeMessage(1, "user", "hello"),
+      assistantMessage: makeMessage(2, "assistant", "Hey! Good to see you."),
+    });
+
+    const { result } = await renderReadyCompanion();
+
+    // Turn voice off so the success path doesn't enter audio playback.
+    act(() => {
+      result.current.toggleVoice();
+    });
+    await waitFor(() => expect(result.current.voiceEnabled).toBe(false));
+
+    // The companion starts from a fresh, non-sad mood.
+    expect(result.current.mood.label).not.toBe("sad");
+
+    await act(async () => {
+      await result.current.sendText("hello");
+    });
+
+    // The failed delivery makes the companion sad.
+    expect(result.current.mood.label).toBe("sad");
+    expect(result.current.error).toBe(FRIENDLY_ERROR);
+
+    await act(async () => {
+      await result.current.retryMessage();
+    });
+
+    // A real exchange lifts the mood back to a computed (never "sad") label —
+    // "sad" is only ever set imperatively by the error path, and the fresh
+    // snapshot plus interaction boost lands the companion at "bright".
+    expect(result.current.mood.label).not.toBe("sad");
+    expect(result.current.mood.label).toBe("bright");
+    expect(result.current.error).toBeNull();
+  });
+
+  it("stays sad while retries keep failing", async () => {
+    mockSendMessage.mockRejectedValue(new Error("still down"));
+
+    const { result } = await renderReadyCompanion();
+
+    act(() => {
+      result.current.toggleVoice();
+    });
+    await waitFor(() => expect(result.current.voiceEnabled).toBe(false));
+
+    await act(async () => {
+      await result.current.sendText("hello");
+    });
+    expect(result.current.mood.label).toBe("sad");
+
+    await act(async () => {
+      await result.current.retryMessage();
+    });
+
+    // No successful exchange happened, so the companion never perks up.
+    expect(result.current.mood.label).toBe("sad");
+  });
+
+  it("stays sad after an unrelated state update while the failed turn is still pending", async () => {
+    mockSendMessage.mockRejectedValueOnce(new Error("AI unavailable"));
+
+    const { result } = await renderReadyCompanion();
+
+    act(() => {
+      result.current.toggleVoice();
+    });
+    await waitFor(() => expect(result.current.voiceEnabled).toBe(false));
+
+    await act(async () => {
+      await result.current.sendText("hello");
+    });
+
+    // Companion goes sad and the failed turn is still unresolved.
+    expect(result.current.mood.label).toBe("sad");
+    expect(result.current.failedTurn).not.toBeNull();
+
+    // An unrelated state mutation (toggling voice back on) must not clear the
+    // sad label — the companion stays sad until the user actually retries.
+    act(() => {
+      result.current.toggleVoice();
+    });
+    await waitFor(() => expect(result.current.voiceEnabled).toBe(true));
+
+    expect(result.current.mood.label).toBe("sad");
+    expect(result.current.failedTurn).not.toBeNull();
+    expect(result.current.error).toBe(FRIENDLY_ERROR);
+  });
+
+  it("recovers from sad on a plain successful send (not only via retry)", async () => {
+    mockSendMessage.mockRejectedValueOnce(new Error("AI unavailable"));
+    mockSendMessage.mockResolvedValueOnce({
+      userMessage: makeMessage(3, "user", "you ok?"),
+      assistantMessage: makeMessage(4, "assistant", "All good now!"),
+    });
+
+    const { result } = await renderReadyCompanion();
+
+    act(() => {
+      result.current.toggleVoice();
+    });
+    await waitFor(() => expect(result.current.voiceEnabled).toBe(false));
+
+    await act(async () => {
+      await result.current.sendText("hello");
+    });
+    expect(result.current.mood.label).toBe("sad");
+
+    // The user types a brand-new message instead of tapping retry.
+    await act(async () => {
+      await result.current.sendText("you ok?");
+    });
+
+    expect(result.current.mood.label).toBe("bright");
+    expect(result.current.error).toBeNull();
+  });
+});
+
 describe("CompanionContext proactive check-in", () => {
   const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -368,9 +479,10 @@ describe("CompanionContext proactive check-in", () => {
       }),
     );
     mockListMessages.mockResolvedValue([makeMessage(1, "user", "earlier hi")]);
-    mockCompanionCheckIn.mockResolvedValue(
-      makeMessage(2, "assistant", "I missed you — how have you been?"),
-    );
+    mockCompanionCheckIn.mockResolvedValue({
+      ...makeMessage(2, "assistant", "I missed you — how have you been?"),
+      reflectionThought: null,
+    });
 
     const { result } = await renderReadyCompanion();
 
@@ -561,6 +673,8 @@ describe("CompanionContext conversation title persistence", () => {
       id: 7,
       title: "Late night talks",
       createdAt: new Date("2026-06-12T00:00:00.000Z").toISOString(),
+      lastMessageText: null,
+      lastMessageAt: null,
     });
 
     const { result } = await renderReadyCompanion();
@@ -588,6 +702,8 @@ describe("CompanionContext conversation title persistence", () => {
       id: 1,
       title: "Morning pages",
       createdAt: new Date("2026-06-12T00:00:00.000Z").toISOString(),
+      lastMessageText: null,
+      lastMessageAt: null,
     });
 
     await act(async () => {
@@ -619,6 +735,8 @@ describe("CompanionContext conversation title persistence", () => {
       id: 7,
       title: "Late night talks",
       createdAt: new Date("2026-06-12T00:00:00.000Z").toISOString(),
+      lastMessageText: null,
+      lastMessageAt: null,
     });
 
     const { result } = await renderReadyCompanion();
@@ -631,5 +749,96 @@ describe("CompanionContext conversation title persistence", () => {
     expect(result.current.conversationTitle).toBe("Empiri");
     // The stored pointer is cleared so the next account can't inherit it.
     expect(await AsyncStorage.getItem(CONVERSATION_KEY)).toBeNull();
+  });
+});
+
+describe("CompanionContext stale conversation pointer recovery", () => {
+  const CONVERSATION_KEY = "empiri.conversationId";
+  const mockListConversations =
+    listConversations as jest.MockedFunction<typeof listConversations>;
+
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+  });
+
+  afterEach(async () => {
+    await AsyncStorage.clear();
+  });
+
+  it("silently resumes an existing server conversation when the stored id returns 404", async () => {
+    // The device has a stale pointer (id 99) that no longer exists on the server.
+    await AsyncStorage.setItem(CONVERSATION_KEY, "99");
+
+    // First listMessages call (for the stale id) — signals the id is gone.
+    const notFound = Object.assign(new Error("Not Found"), { status: 404 });
+    mockListMessages
+      .mockRejectedValueOnce(notFound)
+      // Second call: loading history for the resumed conversation.
+      .mockResolvedValueOnce([makeMessage(10, "user", "old message")]);
+
+    // The account still has a valid conversation on the server.
+    mockListConversations.mockResolvedValue([
+      {
+        id: 5,
+        title: "Restored chat",
+        createdAt: new Date("2026-06-12T00:00:00.000Z").toISOString(),
+        lastMessageText: null,
+        lastMessageAt: null,
+      },
+    ]);
+
+    const { result } = await renderReadyCompanion();
+
+    // The app recovers without an error screen.
+    expect(result.current.initializing).toBe(false);
+    expect(result.current.initError).toBeNull();
+
+    // The active conversation is now the one from the server.
+    expect(result.current.conversationId).toBe(5);
+
+    // AsyncStorage now points at the valid id so the next restart is fast.
+    expect(await AsyncStorage.getItem(CONVERSATION_KEY)).toBe("5");
+
+    // createConversation must NOT have been called — we resumed an existing one.
+    expect(mockCreateConversation).not.toHaveBeenCalled();
+
+    // History from the resumed conversation is loaded.
+    expect(result.current.messages.some((m) => m.content === "old message")).toBe(true);
+  });
+
+  it("creates a fresh conversation when the stored id 404s and the account has no conversations", async () => {
+    // The device has a stale pointer (id 99).
+    await AsyncStorage.setItem(CONVERSATION_KEY, "99");
+
+    // listMessages for the stale id → 404.
+    const notFound = Object.assign(new Error("Not Found"), { status: 404 });
+    mockListMessages.mockRejectedValueOnce(notFound);
+
+    // The account has no conversations at all.
+    mockListConversations.mockResolvedValue([]);
+
+    // The new conversation the server creates.
+    mockCreateConversation.mockResolvedValue({
+      id: 42,
+      title: "Empiri",
+      createdAt: new Date("2026-06-12T00:00:00.000Z").toISOString(),
+      lastMessageText: null,
+      lastMessageAt: null,
+    });
+
+    const { result } = await renderReadyCompanion();
+
+    // The app recovers without an error screen.
+    expect(result.current.initializing).toBe(false);
+    expect(result.current.initError).toBeNull();
+
+    // createConversation was called because there was nothing to resume.
+    expect(mockCreateConversation).toHaveBeenCalledTimes(1);
+
+    // The context points at the freshly created conversation.
+    expect(result.current.conversationId).toBe(42);
+
+    // The new id is persisted so the next cold start finds a valid pointer.
+    expect(await AsyncStorage.getItem(CONVERSATION_KEY)).toBe("42");
   });
 });

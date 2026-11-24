@@ -1,7 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
-  companionCheckIn,
+  companionCheckInFull,
   createConversation,
+  deleteConversation as deleteConversationApi,
   devRegressSelf,
   fetchStream,
   getCompanionSettings,
@@ -15,7 +16,9 @@ import {
   updateCompanionSettings,
   type CompanionSettings,
   type CompanionSettingsInput,
+  type Conversation,
   type Message,
+  type Percept,
 } from "@workspace/api-client-react";
 import {
   AudioModule,
@@ -24,7 +27,9 @@ import {
   setAudioModeAsync,
   useAudioRecorder,
 } from "expo-audio";
+import * as Battery from "expo-battery";
 import * as FileSystem from "expo-file-system/legacy";
+import { Accelerometer } from "expo-sensors";
 import React, {
   createContext,
   useCallback,
@@ -33,7 +38,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 
 import {
   cadenceHours,
@@ -41,24 +46,33 @@ import {
   DEFAULT_CADENCE,
   freshMoodState,
   registerInteraction,
-  shouldCheckIn,
   type CheckInCadence,
   type CompanionMoodState,
   type ComputedMood,
 } from "@/lib/mood";
+import { shouldProactivelyCheckIn } from "@/lib/checkInGate";
 import {
   cancelNudges,
   requestNotificationPermission,
   scheduleNudge,
   scheduleNudgeInSeconds,
 } from "@/lib/notifications";
+import { classifyVoiceError } from "@/lib/voiceErrors";
 import {
   adjustNudgeHoursForQuietHours,
   DEFAULT_QUIET_HOURS,
-  isInQuietHours,
   parseQuietHours,
   type QuietHours,
 } from "@/lib/quietHours";
+import {
+  batteryLowPercept,
+  chargingPercept,
+  collectOutgoingPercepts,
+  detectShake,
+  pushPercept,
+  SENSES_KEY,
+  shakeMagnitude,
+} from "@/lib/senses";
 import { useAuth } from "@/lib/auth";
 
 export type CompanionStatus =
@@ -88,19 +102,47 @@ interface CompanionContextValue {
   conversationId: number | null;
   /** The user-visible title of the current conversation. */
   conversationTitle: string;
+  /** All of the user's conversations (for the chat switcher), oldest first. */
+  chats: Conversation[];
+  /** Re-fetch the conversation list from the server (best-effort). */
+  refreshChats: () => Promise<void>;
+  /** Switch to another of the user's conversations and load its history. */
+  openConversation: (id: number) => Promise<void>;
+  /** Create a fresh conversation and switch to it. */
+  startNewChat: () => Promise<void>;
   /** Rename the current conversation; persists on the server and updates
    * the title everywhere immediately. Throws on failure so the caller can
    * surface an error. */
   renameConversation: (title: string) => Promise<void>;
+  /**
+   * Delete a conversation by id. Removes it from the chat list and, if it
+   * was the active conversation, automatically switches to the next available
+   * one (or creates a fresh chat when none remain). Throws on API failure.
+   */
+  deleteConversation: (id: number) => Promise<void>;
   initializing: boolean;
   initError: string | null;
   error: string | null;
   failedTurn: FailedTurn | null;
   isRecording: boolean;
+  /** True while an audio-call mode loop is running. */
+  isCallActive: boolean;
+  /**
+   * Ref whose `.current` is the normalised microphone volume (0 = silent,
+   * 1 = loud) while a recording is in progress; 0 at all other times.
+   * Consumers read this ref from their own animation loops — it does NOT
+   * trigger React re-renders, keeping the UI thread light.
+   */
+  micVolumeRef: React.MutableRefObject<number>;
   sendText: (content: string) => Promise<void>;
   retryMessage: () => Promise<void>;
   startListening: () => Promise<void>;
-  stopListening: () => Promise<void>;
+  stopListening: () => Promise<boolean>;
+  /** Start a continuous listen→transcribe→send→speak call loop. Triggered
+   * by a 3-second long-press on the mic button. */
+  startCall: () => Promise<void>;
+  /** End the active call loop and return to normal text-chat mode. */
+  endCall: () => void;
   toggleVoice: () => void;
   toggleNotifications: () => Promise<void>;
   setCheckInCadence: (cadence: CheckInCadence) => Promise<void>;
@@ -108,6 +150,19 @@ interface CompanionContextValue {
   quietHours: QuietHours;
   /** Persist a new quiet-hours window and re-arm any pending nudge around it. */
   setQuietHours: (next: QuietHours) => Promise<void>;
+  /** Whether the opt-in device senses (motion, battery, time of day) are on. */
+  sensesEnabled: boolean;
+  /** Flip the senses opt-in; turning it off discards anything already sensed. */
+  toggleSenses: () => void;
+  /**
+   * The reflection thought Empiri composed while the user was away, together
+   * with the message ID it is keyed to for dismissal tracking. Null when no
+   * reflection is due (short absence) or the user has already dismissed it.
+   */
+  pendingReflection: { thought: string; messageId: number } | null;
+  /** Dismiss the current reflection card and persist the decision so it won't
+   * reappear for this absence even after the app is restarted. */
+  dismissReflection: () => Promise<void>;
   retryInit: () => void;
   dismissError: () => void;
   signOut: () => Promise<void>;
@@ -138,6 +193,12 @@ const MOOD_KEY = "empiri.moodState";
 const NOTIF_KEY = "empiri.notificationsEnabled";
 const CADENCE_KEY = "empiri.checkInCadence";
 const QUIET_HOURS_KEY = "empiri.quietHours";
+/**
+ * AsyncStorage key prefix for tracking which reflection card the user has
+ * dismissed. Stored as `${prefix}.${conversationId}` → string message ID.
+ * Keyed by conversation so switching chats shows the right dismissal state.
+ */
+const REFLECTION_DISMISSED_PREFIX = "empiri.reflection.dismissed";
 
 const NUDGE_BODY = "I've been thinking about you — come say hi when you can. 🧡";
 
@@ -185,20 +246,64 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   );
   const [conversationId, setConversationId] = useState<number | null>(null);
   const [conversationTitle, setConversationTitle] = useState<string>("Empiri");
+  const [chats, setChats] = useState<Conversation[]>([]);
   const [initializing, setInitializing] = useState<boolean>(true);
   const [initError, setInitError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [failedTurn, setFailedTurn] = useState<FailedTurn | null>(null);
   const [isRecording, setIsRecording] = useState<boolean>(false);
+  const [isCallActive, setIsCallActive] = useState<boolean>(false);
   const [settings, setSettings] = useState<CompanionSettings | null>(null);
+  const [sensesEnabled, setSensesEnabled] = useState<boolean>(false);
+  const [pendingReflection, setPendingReflection] = useState<{
+    thought: string;
+    messageId: number;
+  } | null>(null);
 
   const conversationIdRef = useRef<number | null>(null);
+  // Monotonically-increasing counter: every openConversation call takes a
+  // snapshot before the await and checks it afterwards. The last caller wins;
+  // any earlier in-flight call that resolves late sees a stale token and
+  // discards its result instead of overwriting the newer chat.
+  const switchTokenRef = useRef<number>(0);
   const failedTurnRef = useRef<FailedTurn | null>(null);
   const moodStateRef = useRef<CompanionMoodState>(moodState);
   const notificationsEnabledRef = useRef<boolean>(notificationsEnabled);
+  // Mirrors the isRecording state so callbacks that run in async contexts
+  // always see the current value without depending on the state directly.
+  const isRecordingRef = useRef<boolean>(false);
+  const isCallActiveRef = useRef<boolean>(false);
+  // When a call is active, Empiri must always speak its reply regardless of
+  // the user's voiceEnabled toggle. This ref is read inside deliver().
+  const callForcesVoiceRef = useRef<boolean>(false);
+  // Used by startCall to auto-stop each recording round after a timeout;
+  // cleared by endCall so the loop can exit promptly.
+  const callAutoStopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const callRoundResolveRef = useRef<(() => void) | null>(null);
   const checkInCadenceRef = useRef<CheckInCadence>(checkInCadence);
   const quietHoursRef = useRef<QuietHours>(quietHours);
-  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const sensesEnabledRef = useRef<boolean>(false);
+  const perceptsRef = useRef<Percept[]>([]);
+  const lastShakeAtRef = useRef<number | null>(null);
+  const batteryLowReportedRef = useRef<boolean>(false);
+  // HIGH_QUALITY gives better results with background noise and non-English
+  // speech (e.g. German). ~128 kbps AAC; a 20-second clip ≈ 320 KB, well
+  // under the 50 MB body limit on the API server.
+  //
+  // micVolumeRef holds the current normalised input level (0–1) that
+  // ChatInput reads from its own animation loop. Using a ref avoids
+  // triggering a React re-render on every metering tick.
+  const micVolumeRef = useRef<number>(0);
+  // Stores the setInterval handle that polls recorder.getStatus().metering
+  // while a recording is active. Cleared in stopListening and endCall.
+  const meterIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // isMeteringEnabled tells the native layer to compute dBFS level on each
+  // status tick; we read it synchronously via recorder.getStatus() from our
+  // own 120 ms polling interval so we don't have to fight the callback type.
+  const recorder = useAudioRecorder({
+    ...RecordingPresets.HIGH_QUALITY,
+    isMeteringEnabled: true,
+  });
 
   // Keep refs in sync so timers/callbacks always see the latest values.
   useEffect(() => {
@@ -217,7 +322,11 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const applyMoodState = useCallback((next: CompanionMoodState) => {
     moodStateRef.current = next;
     setMoodState(next);
-    setMood(computeMood(next));
+    // Don't overwrite the sad label while a failed turn is waiting for a retry.
+    // The mood snaps back to a computed value only once the turn is resolved.
+    if (failedTurnRef.current == null) {
+      setMood(computeMood(next));
+    }
     AsyncStorage.setItem(MOOD_KEY, JSON.stringify(next)).catch(() => {});
   }, []);
 
@@ -273,6 +382,19 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     playSpeechRef.current = playSpeech;
   }, [playSpeech]);
 
+  // Everything sensed since the last request, gated by the opt-in and the
+  // platform (see collectOutgoingPercepts). Draining clears the buffer so the
+  // same moment is never reported to the companion twice.
+  const drainPercepts = useCallback((): Percept[] | undefined => {
+    const percepts = collectOutgoingPercepts({
+      enabled: sensesEnabledRef.current,
+      isWeb: Platform.OS === "web",
+      buffer: perceptsRef.current,
+    });
+    perceptsRef.current = [];
+    return percepts.length > 0 ? percepts : undefined;
+  }, []);
+
   // Fetch and present a proactive greeting for the companion's current mood.
   // Shared by the time-based check-in on launch and the dev-only "check in now"
   // shortcut, so both paths stay in lockstep.
@@ -282,12 +404,27 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       if (convId == null) return;
       try {
         const current = computeMood(state);
-        const greeting = await companionCheckIn(convId, {
+        const percepts = drainPercepts();
+        const result = await companionCheckInFull(convId, {
           hoursAway: current.hoursAway,
           mood: current.label,
           missingYou: current.missingYou,
+          ...(percepts ? { percepts } : {}),
         });
+        // Separate the message from the optional reflection thought so the
+        // message lands in the thread immediately and the card appears above.
+        const { reflectionThought, ...greeting } = result;
         setMessages((prev) => [...prev, greeting]);
+        if (reflectionThought) {
+          // Only show the reflection if the user hasn't already dismissed this
+          // exact check-in message.  The dismissed state is persisted across
+          // restarts via AsyncStorage so it survives an app close.
+          const dismissedKey = `${REFLECTION_DISMISSED_PREFIX}.${convId}`;
+          const dismissedId = await AsyncStorage.getItem(dismissedKey).catch(() => null);
+          if (dismissedId !== String(greeting.id)) {
+            setPendingReflection({ thought: reflectionThought, messageId: greeting.id });
+          }
+        }
         if (voiceEnabled) {
           setStatus("speaking");
           await playSpeechRef.current(greeting.content);
@@ -297,7 +434,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         // A failed check-in is silent — the user can still start the chat.
       }
     },
-    [voiceEnabled],
+    [voiceEnabled, drainPercepts],
   );
 
   const initialize = useCallback(async () => {
@@ -311,6 +448,11 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       const notifOn = storedNotif === "true";
       setNotificationsEnabled(notifOn);
       notificationsEnabledRef.current = notifOn;
+
+      const storedSenses = await AsyncStorage.getItem(SENSES_KEY);
+      const sensesOn = storedSenses === "true";
+      setSensesEnabled(sensesOn);
+      sensesEnabledRef.current = sensesOn;
 
       const storedCadence = await AsyncStorage.getItem(CADENCE_KEY);
       const cadence: CheckInCadence =
@@ -348,6 +490,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       // and as a fallback when the locally stored ID turns out to be stale).
       const resumeOrCreate = async () => {
         const owned = await listConversations();
+        setChats(owned);
         if (owned.length > 0) {
           const conversation = owned[0];
           conversationIdRef.current = conversation.id;
@@ -361,6 +504,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
           conversationIdRef.current = conversation.id;
           setConversationId(conversation.id);
           setConversationTitle(conversation.title);
+          setChats([conversation]);
           await AsyncStorage.setItem(CONVERSATION_KEY, String(conversation.id));
           setMessages([]);
         }
@@ -382,6 +526,13 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
             setConversationTitle(conversation.title);
           } catch {
             // keep the default title
+          }
+          // Populate the switcher list. Best-effort: the chat itself already
+          // loaded, so a failed list fetch must not block the app.
+          try {
+            setChats(await listConversations());
+          } catch {
+            // keep whatever we have
           }
         } catch (err) {
           // If the stored conversation no longer exists on the server (e.g.
@@ -416,12 +567,12 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
 
       // After enough quiet time, let the companion greet the user first. It
       // speaks from its current (faded) mood — the lift only comes once the
-      // user replies — so the arc feels real.
+      // user replies — so the arc feels real. The cadence + quiet-hours
+      // suppression rules live in shouldProactivelyCheckIn (lib/checkInGate).
       if (
         conversationIdRef.current != null &&
         history.length > 0 &&
-        shouldCheckIn(loadedMood, cadence) &&
-        !isInQuietHours(loadedQuiet)
+        shouldProactivelyCheckIn(loadedMood, cadence, loadedQuiet)
       ) {
         await runCheckIn(loadedMood);
       }
@@ -443,12 +594,106 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   }, [isAuthenticated, authLoading]);
 
   // Let the mood drift visibly while the app stays open.
+  // Skip the tick while a failed turn is pending — the companion stays sad
+  // until the user actually fixes the message, not just until the next minute.
   useEffect(() => {
     const interval = setInterval(() => {
+      if (failedTurnRef.current != null) return;
       setMood(computeMood(moodStateRef.current));
     }, 60_000);
     return () => clearInterval(interval);
   }, []);
+
+  // Opt-in device senses. Sensor subscriptions exist only while the senses
+  // are switched on, the app is foregrounded, and we're on a native platform —
+  // the web build has no motion/battery access and degrades to the ambient
+  // daypart percept added at send time (see drainPercepts).
+  useEffect(() => {
+    if (!sensesEnabled || Platform.OS === "web") return;
+
+    let accelSub: { remove: () => void } | null = null;
+    let chargeSub: { remove: () => void } | null = null;
+    let levelSub: { remove: () => void } | null = null;
+    let wasCharging: boolean | null = null;
+    let cancelled = false;
+    // Bumped by every start()/stop() so a start() that was still awaiting the
+    // initial battery read when the app backgrounded can never attach its
+    // listeners afterwards (they would be orphaned and leak until unmount).
+    let generation = 0;
+
+    const record = (percept: Percept | null) => {
+      if (percept) {
+        perceptsRef.current = pushPercept(perceptsRef.current, percept);
+      }
+    };
+
+    const start = async () => {
+      const gen = ++generation;
+      Accelerometer.setUpdateInterval(200);
+      accelSub = Accelerometer.addListener((sample) => {
+        const percept = detectShake(
+          shakeMagnitude(sample),
+          lastShakeAtRef.current,
+        );
+        if (percept) {
+          lastShakeAtRef.current = percept.at;
+          record(percept);
+        }
+      });
+
+      try {
+        const state = await Battery.getBatteryStateAsync();
+        if (cancelled || gen !== generation) return;
+        wasCharging =
+          state === Battery.BatteryState.CHARGING ||
+          state === Battery.BatteryState.FULL;
+        chargeSub = Battery.addBatteryStateListener(({ batteryState }) => {
+          const charging =
+            batteryState === Battery.BatteryState.CHARGING ||
+            batteryState === Battery.BatteryState.FULL;
+          record(chargingPercept(wasCharging, charging));
+          wasCharging = charging;
+        });
+        levelSub = Battery.addBatteryLevelListener(({ batteryLevel }) => {
+          const percept = batteryLowPercept(
+            batteryLevel,
+            wasCharging === true,
+            batteryLowReportedRef.current,
+          );
+          if (percept) {
+            batteryLowReportedRef.current = true;
+            record(percept);
+          }
+        });
+      } catch {
+        // Battery info is best-effort; motion sensing still works without it.
+      }
+    };
+
+    const stop = () => {
+      generation++;
+      accelSub?.remove();
+      accelSub = null;
+      chargeSub?.remove();
+      chargeSub = null;
+      levelSub?.remove();
+      levelSub = null;
+    };
+
+    if (AppState.currentState === "active") {
+      start();
+    }
+    const appStateSub = AppState.addEventListener("change", (next) => {
+      stop();
+      if (next === "active") start();
+    });
+
+    return () => {
+      cancelled = true;
+      appStateSub.remove();
+      stop();
+    };
+  }, [sensesEnabled]);
 
   const clearFailedTurn = useCallback(() => {
     failedTurnRef.current = null;
@@ -474,12 +719,19 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       try {
         let userMsg: Message;
         let assistantMsg: Message;
+        const percepts = drainPercepts();
 
         if (Platform.OS === "web") {
           // ── SSE streaming path ──────────────────────────────────────────────
           const streamResponse = await fetchStream(
             `/conversations/${id}/messages/stream`,
-            { method: "POST", body: JSON.stringify({ content }) },
+            {
+              method: "POST",
+              body: JSON.stringify({
+                content,
+                ...(percepts ? { percepts } : {}),
+              }),
+            },
           );
 
           if (!streamResponse.ok) {
@@ -547,7 +799,10 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         } else {
           // ── React Native fallback ───────────────────────────────────────────
           // ReadableStream is not exposed in RN; use the regular REST endpoint.
-          const result = await sendMessage(id, { content });
+          const result = await sendMessage(id, {
+            content,
+            ...(percepts ? { percepts } : {}),
+          });
           userMsg = result.userMessage;
           assistantMsg = result.assistantMessage;
         }
@@ -559,30 +814,62 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
           throw new Error("empty assistant reply");
         }
 
+        // The user may have switched to another conversation (or started a
+        // new chat) while this request was in flight. The reply is already
+        // persisted server-side, but it must never be written into the chat
+        // that is now on screen — that would mix messages across
+        // conversations. The exchange still counts as real contact, though.
+        if (conversationIdRef.current !== id) {
+          touchInteraction();
+          return;
+        }
+
         setMessages((prev) => [
           ...prev.filter((m) => m.id !== optimistic.id),
           userMsg,
           assistantMsg,
         ]);
 
+        // Keep the switcher preview in sync without a full refresh.
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === id
+              ? {
+                  ...c,
+                  lastMessageText: assistantMsg.content,
+                  lastMessageAt: assistantMsg.createdAt,
+                }
+              : c,
+          ),
+        );
+
         // A real exchange happened — the companion perks up.
         touchInteraction();
 
-        if (voiceEnabled) {
+        if (voiceEnabled || callForcesVoiceRef.current) {
           setStatus("speaking");
           await playSpeech(assistantMsg.content);
         }
       } catch {
+        // Same stale-conversation guard: a failure from a chat the user has
+        // already left must not surface an error banner, sad mood, or a
+        // retryable turn in the newly opened chat (the optimistic bubble it
+        // would retry is no longer on screen).
+        if (conversationIdRef.current !== id) return;
         setError("Empiri couldn't reply just now. Try again.");
         setMood((prev) => ({ ...prev, label: "sad" }));
         const failed: FailedTurn = { messageId: optimistic.id, content };
         failedTurnRef.current = failed;
         setFailedTurn(failed);
       } finally {
-        setStatus("idle");
+        // openConversation/startNewChat already reset status for their new
+        // chat; a stale request must not clobber whatever came after.
+        if (conversationIdRef.current === id) {
+          setStatus("idle");
+        }
       }
     },
-    [voiceEnabled, playSpeech, touchInteraction, clearFailedTurn],
+    [voiceEnabled, playSpeech, touchInteraction, clearFailedTurn, drainPercepts],
   );
 
   const sendText = useCallback(
@@ -636,42 +923,196 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       await recorder.prepareToRecordAsync();
       recorder.record();
       setError(null);
+      isRecordingRef.current = true;
       setIsRecording(true);
       setStatus("listening");
+      // Poll metering every 120 ms and write to the ref that ChatInput reads.
+      // recorder.getStatus() is synchronous and returns RecorderState which
+      // includes the dBFS metering value when isMeteringEnabled is true.
+      meterIntervalRef.current = setInterval(() => {
+        if (!isRecordingRef.current) return;
+        try {
+          const s = recorder.getStatus();
+          const db = typeof s.metering === "number" ? s.metering : -160;
+          // Map −60 dB (quiet) … −10 dB (loud) onto 0…1.
+          micVolumeRef.current = Math.max(0, Math.min(1, (db + 60) / 50));
+        } catch {
+          // getStatus() may be unavailable in some environments (e.g. tests);
+          // keep the ref at 0 so the animation shows no pulse.
+        }
+      }, 120);
     } catch {
       setError("Couldn't start recording. Try again.");
+      isRecordingRef.current = false;
       setIsRecording(false);
       setStatus("idle");
+      if (meterIntervalRef.current != null) {
+        clearInterval(meterIntervalRef.current);
+        meterIntervalRef.current = null;
+      }
     }
   }, [recorder]);
 
-  const stopListening = useCallback(async () => {
-    if (!isRecording) return;
+  // Returns true when the round completed successfully (text sent), false when
+  // it failed (empty audio, transcription/network error). Callers that do not
+  // need the result can safely ignore it; startCall uses it to count failures.
+  const stopListening = useCallback(async (): Promise<boolean> => {
+    if (!isRecordingRef.current) return false;
+    isRecordingRef.current = false;
+    if (meterIntervalRef.current != null) {
+      clearInterval(meterIntervalRef.current);
+      meterIntervalRef.current = null;
+    }
+    micVolumeRef.current = 0;
     setIsRecording(false);
     setStatus("transcribing");
+    let uri: string | null = null;
     try {
       await recorder.stop();
-      const uri = recorder.uri;
+      // Restore playback-friendly audio mode so TTS replies come through the
+      // speaker even on iOS (recording mode routes audio to the earpiece).
+      setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+      uri = recorder.uri ?? null;
       if (!uri) {
         setStatus("idle");
-        return;
+        return false;
+      }
+      // Guard against empty recordings (e.g. the user tapped too quickly).
+      // An empty file produces an invalid base64 payload that the server
+      // cannot decode — bail early with a clear user-facing message.
+      const fileInfo = await FileSystem.getInfoAsync(uri);
+      if (!fileInfo.exists || ("size" in fileInfo && fileInfo.size === 0)) {
+        setError("Recording was empty — hold the button and speak.");
+        setStatus("idle");
+        return false;
       }
       const base64 = await FileSystem.readAsStringAsync(uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
-      const format = Platform.OS === "ios" ? "m4a" : "m4a";
-      const { text } = await transcribeAudio({ audio: base64, format });
+      if (!base64 || base64.length < 100) {
+        setError("Recording was too short — try holding the button longer.");
+        setStatus("idle");
+        return false;
+      }
+      const { text } = await transcribeAudio({ audio: base64, format: "m4a" });
       if (!text.trim()) {
         setError("I didn't catch that. Try again.");
         setStatus("idle");
-        return;
+        return false;
       }
       await sendText(text);
-    } catch {
-      setError("Couldn't understand the recording. Try again.");
+      return true;
+    } catch (err) {
+      setError(classifyVoiceError(err));
       setStatus("idle");
+      return false;
+    } finally {
+      // Always remove the temporary recording file to avoid accumulating
+      // .m4a files in the app's cache between sessions.
+      if (uri) {
+        FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+      }
     }
-  }, [isRecording, recorder, sendText]);
+  }, [recorder, sendText]);
+
+  // ── Audio call mode ──────────────────────────────────────────────────────
+  // Holding the mic button for 3 s launches a continuous listen → transcribe
+  // → send → speak loop. Each round auto-stops after CALL_ROUND_MS; endCall
+  // breaks the loop immediately by unblocking the pending await.
+
+  const endCall = useCallback(() => {
+    isCallActiveRef.current = false;
+    callForcesVoiceRef.current = false;
+    if (meterIntervalRef.current != null) {
+      clearInterval(meterIntervalRef.current);
+      meterIntervalRef.current = null;
+    }
+    micVolumeRef.current = 0;
+    setIsCallActive(false);
+    if (callAutoStopRef.current != null) {
+      clearTimeout(callAutoStopRef.current);
+      callAutoStopRef.current = null;
+    }
+    if (callRoundResolveRef.current != null) {
+      callRoundResolveRef.current();
+      callRoundResolveRef.current = null;
+    }
+    if (isRecordingRef.current) {
+      isRecordingRef.current = false;
+      setIsRecording(false);
+      setStatus("idle");
+      recorder.stop().catch(() => {}).finally(() => {
+        setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+      });
+    } else {
+      // Even if not recording, restore playback mode in case it was partially set.
+      setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+    }
+  }, [recorder]);
+
+  const startCall = useCallback(async () => {
+    if (isCallActiveRef.current) return;
+    if (conversationIdRef.current == null) return;
+
+    const CALL_ROUND_MS = 20_000;
+    // End the call automatically after this many consecutive failed rounds so
+    // a persistent network outage does not loop forever.
+    const MAX_CONSECUTIVE_ERRORS = 4;
+
+    isCallActiveRef.current = true;
+    callForcesVoiceRef.current = true;
+    // setIsCallActive(true) is deferred until startListening confirms that
+    // recording actually started. If permission is denied or a hardware error
+    // fires, we exit without ever showing the "call active" indicator.
+
+    let consecutiveErrors = 0;
+
+    try {
+      while (isCallActiveRef.current) {
+        await startListening();
+
+        if (!isRecordingRef.current) {
+          // startListening failed (permissions denied, hardware error, etc.)
+          break;
+        }
+
+        // Recording confirmed — surface the active indicator now. React
+        // deduplicates redundant setStates, so calling this on every
+        // successful round is safe and never triggers an extra render.
+        setIsCallActive(true);
+
+        // Wait for the round timeout or an early exit from endCall().
+        await new Promise<void>((resolve) => {
+          callRoundResolveRef.current = resolve;
+          callAutoStopRef.current = setTimeout(() => {
+            callRoundResolveRef.current = null;
+            resolve();
+          }, CALL_ROUND_MS);
+        });
+        callRoundResolveRef.current = null;
+        callAutoStopRef.current = null;
+
+        if (!isCallActiveRef.current) break;
+
+        // Transcribe → send → speak. stopListening returns true on success,
+        // false on any error (it also surfaces the error via setError).
+        const roundOk = await stopListening();
+
+        if (!roundOk) {
+          consecutiveErrors += 1;
+          if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) break;
+        } else {
+          consecutiveErrors = 0;
+        }
+
+        if (!isCallActiveRef.current) break;
+      }
+    } finally {
+      isCallActiveRef.current = false;
+      callForcesVoiceRef.current = false;
+      setIsCallActive(false);
+    }
+  }, [startListening, stopListening]);
 
   const toggleVoice = useCallback(() => {
     setVoiceEnabled((prev) => {
@@ -756,6 +1197,24 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // Opt-in senses toggle. OFF is the default and the hard boundary: switching
+  // off tears down the sensor subscriptions (via the lifecycle effect) AND
+  // discards anything already buffered, so nothing sensed earlier can leak
+  // into a later send.
+  const toggleSenses = useCallback(() => {
+    setSensesEnabled((prev) => {
+      const next = !prev;
+      sensesEnabledRef.current = next;
+      if (!next) {
+        perceptsRef.current = [];
+        lastShakeAtRef.current = null;
+        batteryLowReportedRef.current = false;
+      }
+      AsyncStorage.setItem(SENSES_KEY, String(next)).catch(() => {});
+      return next;
+    });
+  }, []);
+
   // Persist the do-not-disturb window and re-arm any pending nudge so a
   // change takes effect immediately instead of on the next interaction.
   const setQuietHours = useCallback(async (next: QuietHours) => {
@@ -809,12 +1268,137 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     if (!title || id == null) return;
     const updated = await apiRenameConversation(id, { title });
     setConversationTitle(updated.title);
+    setChats((prev) =>
+      prev.map((c) => (c.id === updated.id ? { ...c, title: updated.title } : c)),
+    );
+  }, []);
+
+  // Re-fetch the switcher list. Best-effort: a failure keeps the old list.
+  const refreshChats = useCallback(async () => {
+    try {
+      setChats(await listConversations());
+    } catch {
+      // keep whatever we have
+    }
+  }, []);
+
+  /**
+   * Switch the app to another of the user's conversations. Loads the
+   * history and title BEFORE swapping the active id so the chat never shows
+   * one conversation's messages under another's identity. Throws on failure
+   * so the switcher sheet can surface an error and stay open.
+   */
+  const openConversation = useCallback(async (id: number) => {
+    if (conversationIdRef.current === id) return;
+    // Claim this switch. If another openConversation call starts (and finishes)
+    // while we're awaiting, our token will be stale and we discard the result
+    // instead of overwriting the newer chat.
+    const myToken = ++switchTokenRef.current;
+    const [conversation, history] = await Promise.all([
+      getConversation(id),
+      listMessages(id),
+    ]);
+    if (switchTokenRef.current !== myToken) return;
+    conversationIdRef.current = conversation.id;
+    setConversationId(conversation.id);
+    setConversationTitle(conversation.title);
+    setMessages(history);
+    failedTurnRef.current = null;
+    setFailedTurn(null);
+    setError(null);
+    setPendingReflection(null);
+    setStatus("idle");
+    await AsyncStorage.setItem(CONVERSATION_KEY, String(conversation.id));
+  }, []);
+
+  /**
+   * Delete a conversation. Removes it from the local list and, when it was
+   * the active conversation, transparently moves to the most-recent remaining
+   * chat (or creates a new one when the list would otherwise be empty).
+   */
+  const deleteConversation = useCallback(
+    async (id: number) => {
+      await deleteConversationApi(id);
+
+      // Remove from local switcher list.
+      const remaining = chats.filter((c) => c.id !== id);
+      setChats(remaining);
+
+      // Clean up any persisted reflection-dismissal key for this chat.
+      AsyncStorage.removeItem(`${REFLECTION_DISMISSED_PREFIX}.${id}`).catch(() => {});
+
+      // If this wasn't the active conversation we're done.
+      if (conversationIdRef.current !== id) return;
+
+      // Active chat was deleted — move somewhere else.
+      if (remaining.length > 0) {
+        // Pick the newest remaining conversation (last in oldest-first array).
+        const next = remaining[remaining.length - 1];
+        const myToken = ++switchTokenRef.current;
+        const [conversation, history] = await Promise.all([
+          getConversation(next.id),
+          listMessages(next.id),
+        ]);
+        if (switchTokenRef.current !== myToken) return;
+        conversationIdRef.current = conversation.id;
+        setConversationId(conversation.id);
+        setConversationTitle(conversation.title);
+        setMessages(history);
+        failedTurnRef.current = null;
+        setFailedTurn(null);
+        setError(null);
+        setPendingReflection(null);
+        setStatus("idle");
+        await AsyncStorage.setItem(CONVERSATION_KEY, String(conversation.id));
+      } else {
+        // No chats remain — create a fresh one.
+        const conversation = await createConversation({ title: "Empiri" });
+        conversationIdRef.current = conversation.id;
+        setConversationId(conversation.id);
+        setConversationTitle(conversation.title);
+        setChats([conversation]);
+        setMessages([]);
+        failedTurnRef.current = null;
+        setFailedTurn(null);
+        setError(null);
+        setPendingReflection(null);
+        setStatus("idle");
+        await AsyncStorage.setItem(CONVERSATION_KEY, String(conversation.id));
+      }
+    },
+    [chats],
+  );
+
+  /** Create a fresh conversation and switch to it. Throws on failure. */
+  const startNewChat = useCallback(async () => {
+    const conversation = await createConversation({ title: "New chat" });
+    setChats((prev) => [...prev, conversation]);
+    conversationIdRef.current = conversation.id;
+    setConversationId(conversation.id);
+    setConversationTitle(conversation.title);
+    setMessages([]);
+    failedTurnRef.current = null;
+    setFailedTurn(null);
+    setError(null);
+    setPendingReflection(null);
+    setStatus("idle");
+    await AsyncStorage.setItem(CONVERSATION_KEY, String(conversation.id));
   }, []);
 
   const saveSettings = useCallback(async (patch: CompanionSettingsInput) => {
     const updated = await updateCompanionSettings(patch);
     setSettings(updated);
   }, []);
+
+  const dismissReflection = useCallback(async () => {
+    if (!pendingReflection) return;
+    const convId = conversationIdRef.current;
+    if (convId != null) {
+      const key = `${REFLECTION_DISMISSED_PREFIX}.${convId}`;
+      await AsyncStorage.setItem(key, String(pendingReflection.messageId)).catch(() => {});
+    }
+    setPendingReflection(null);
+  }, [pendingReflection]);
 
   const retryInit = useCallback(() => {
     initialize();
@@ -836,6 +1420,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     conversationIdRef.current = null;
     setConversationId(null);
     setConversationTitle("Empiri");
+    setChats([]);
     setMessages([]);
     failedTurnRef.current = null;
     setFailedTurn(null);
@@ -843,12 +1428,16 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     setStatus("idle");
     setNotificationsEnabled(false);
     notificationsEnabledRef.current = false;
+    perceptsRef.current = [];
+    lastShakeAtRef.current = null;
+    batteryLowReportedRef.current = false;
 
     const fresh = freshMoodState();
     moodStateRef.current = fresh;
     setMoodState(fresh);
     setMood(computeMood(fresh));
     setSettings(null);
+    setPendingReflection(null);
 
     await logout();
   }, [logout]);
@@ -864,21 +1453,34 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         mood,
         conversationId,
         conversationTitle,
+        chats,
+        refreshChats,
+        openConversation,
+        startNewChat,
         renameConversation,
+        deleteConversation,
         initializing,
         initError,
         error,
         failedTurn,
         isRecording,
+        isCallActive,
+        micVolumeRef,
         sendText,
         retryMessage,
         startListening,
         stopListening,
+        startCall,
+        endCall,
         toggleVoice,
         toggleNotifications,
         setCheckInCadence,
         quietHours,
         setQuietHours,
+        sensesEnabled,
+        toggleSenses,
+        pendingReflection,
+        dismissReflection,
         retryInit,
         dismissError,
         signOut,

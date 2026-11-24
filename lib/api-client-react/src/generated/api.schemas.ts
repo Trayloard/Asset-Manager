@@ -55,6 +55,10 @@ export interface Conversation {
   id: number;
   title: string;
   createdAt: string;
+  /** @nullable */
+  lastMessageText?: string | null;
+  /** @nullable */
+  lastMessageAt?: string | null;
 }
 
 export interface ConversationInput {
@@ -77,9 +81,44 @@ export interface Message {
   createdAt: string;
 }
 
+export type PerceptKind = typeof PerceptKind[keyof typeof PerceptKind];
+
+
+export const PerceptKind = {
+  shake: 'shake',
+  charging: 'charging',
+  battery_low: 'battery_low',
+  daypart: 'daypart',
+} as const;
+
+/**
+ * One gentle, privacy-safe moment of device perception (opt-in only).
+ */
+export interface Percept {
+  kind: PerceptKind;
+  /**
+     * How salient the moment felt, 0-1
+     * @minimum 0
+     * @maximum 1
+     */
+  intensity: number;
+  /** When it happened (epoch milliseconds, client clock) */
+  at: number;
+  /**
+     * Optional qualifier, e.g. the daypart bucket ("late_night")
+     * @maxLength 32
+     */
+  detail?: string;
+}
+
 export interface MessageInput {
   /** @minLength 1 */
   content: string;
+  /**
+     * Device percepts sensed since the last send (opt-in senses only)
+     * @maxItems 8
+     */
+  percepts?: Percept[];
 }
 
 export interface SendMessageResult {
@@ -94,6 +133,11 @@ export interface CheckInInput {
   mood: string;
   /** How much the companion has been missing the user, 0-100 */
   missingYou?: number;
+  /**
+     * Device percepts sensed since the last send (opt-in senses only)
+     * @maxItems 8
+     */
+  percepts?: Percept[];
 }
 
 export interface TranscribeInput {
@@ -137,6 +181,30 @@ export interface CompanionInterest {
   affinity: number;
 }
 
+export interface CompanionFact {
+  /** Stable slot identifier (e.g. "dog_name") — a later update to the same slot replaces the text. */
+  key: string;
+  /** The remembered statement, third-person ("Their dog is called Milo"). */
+  text: string;
+  /** How firmly the fact is held right now (0-100); grows on re-mention, fades over time. */
+  salience: number;
+}
+
+export interface CompanionChapter {
+  /** Epoch ms of the earliest moment the chapter covers. */
+  from: number;
+  /** Epoch ms of the latest moment the chapter covers. */
+  to: number;
+  /** The condensed chapter text, second person ("Back then you…"). */
+  text: string;
+  /** Core themes of the period (normalized topic keys). */
+  themes: string[];
+  /** Optional source lines that grounded this chapter. */
+  sourceLines?: string[];
+  /** Optional representative epoch ms for the chapter memory. */
+  memoryDate?: number;
+}
+
 /**
  * Meaning-based grouping of curiosities, computed server-side — maps a normalized interest topic key to its theme label. Topics absent from the map stand alone. Null when grouping is temporarily unavailable.
  * @nullable
@@ -148,6 +216,10 @@ export interface CompanionSelf {
   traits: CompanionTrait[];
   interests: CompanionInterest[];
   narrative: string[];
+  /** Durable personal facts the companion remembers about the user, most salient first. */
+  facts: CompanionFact[];
+  /** The condensed life story so far — dated chapters, oldest first. */
+  chapters: CompanionChapter[];
   interactions: number;
   ageHours: number;
   /**
@@ -175,6 +247,15 @@ export interface CompanionMemory {
      * @nullable
      */
   summary: string | null;
+}
+
+export interface UpdateCompanionMemoryInput {
+  /**
+     * The corrected summary text the companion should remember.
+     * @minLength 1
+     * @maxLength 2000
+     */
+  summary: string;
 }
 
 /**
@@ -226,6 +307,93 @@ export interface ApiError {
   error: string;
 }
 
+export type ConversationMessageRole = typeof ConversationMessageRole[keyof typeof ConversationMessageRole];
+
+
+export const ConversationMessageRole = {
+  user: 'user',
+  assistant: 'assistant',
+} as const;
+
+export interface ConversationMessage {
+  id: string;
+  role: ConversationMessageRole;
+  content: string;
+  /** Unix timestamp in milliseconds. */
+  timestamp: number;
+}
+
+export interface ConversationEnvelope {
+  messages: ConversationMessage[];
+}
+
+export interface ConversationSummary {
+  id: number;
+  title: string;
+  /** Unix timestamp in milliseconds. */
+  createdAt: number;
+}
+
+export interface ConversationListEnvelope {
+  conversations: ConversationSummary[];
+}
+
+export interface ConversationDetailEnvelope {
+  conversation: ConversationSummary;
+}
+
+export interface CreateConversationRequest {
+  /** @minLength 1 */
+  title?: string;
+}
+
+export type SaveMessageRequestRole = typeof SaveMessageRequestRole[keyof typeof SaveMessageRequestRole];
+
+
+export const SaveMessageRequestRole = {
+  user: 'user',
+  assistant: 'assistant',
+} as const;
+
+export interface SaveMessageRequest {
+  role: SaveMessageRequestRole;
+  /** @minLength 1 */
+  content: string;
+}
+
+export interface SaveMessageResponse {
+  message: ConversationMessage;
+}
+
+export const ClearConversationSuccessValue = {
+  success: true,
+} as const;
+export type ClearConversationSuccess = typeof ClearConversationSuccessValue;
+
+export const DeleteAccountSuccessValue = {
+  success: true,
+} as const;
+export type DeleteAccountSuccess = typeof DeleteAccountSuccessValue;
+
+export interface CompanionSettingsEnvelope {
+  settings: CompanionSettings;
+}
+
+export interface UpdateCompanionSettingsRequest {
+  /**
+     * @minLength 1
+     * @maxLength 40
+     */
+  name: string;
+  /** @minLength 1 */
+  tone: string;
+  /**
+     * @maxLength 280
+     * @nullable
+     */
+  personalityNote?: string | null;
+}
+
 /**
  * Opaque session token — `Bearer <sid>`.
  */
@@ -243,4 +411,3 @@ code?: string;
 state?: string;
 iss?: string;
 };
-

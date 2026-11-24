@@ -103,7 +103,9 @@ export const LogoutMobileSessionResponse = zod.object({
 export const ListConversationsResponseItem = zod.object({
   "id": zod.number(),
   "title": zod.string(),
-  "createdAt": zod.coerce.date()
+  "createdAt": zod.coerce.date(),
+  "lastMessageText": zod.string().nullish(),
+  "lastMessageAt": zod.coerce.date().nullish()
 })
 export const ListConversationsResponse = zod.array(ListConversationsResponseItem)
 
@@ -126,7 +128,9 @@ export const GetConversationParams = zod.object({
 export const GetConversationResponse = zod.object({
   "id": zod.number(),
   "title": zod.string(),
-  "createdAt": zod.coerce.date()
+  "createdAt": zod.coerce.date(),
+  "lastMessageText": zod.string().nullish(),
+  "lastMessageAt": zod.coerce.date().nullish()
 })
 
 
@@ -148,7 +152,9 @@ export const RenameConversationBody = zod.object({
 export const RenameConversationResponse = zod.object({
   "id": zod.number(),
   "title": zod.string(),
-  "createdAt": zod.coerce.date()
+  "createdAt": zod.coerce.date(),
+  "lastMessageText": zod.string().nullish(),
+  "lastMessageAt": zod.coerce.date().nullish()
 })
 
 
@@ -177,10 +183,23 @@ export const SendMessageParams = zod.object({
 })
 
 
+export const sendMessageBodyPerceptsItemIntensityMin = 0;
+export const sendMessageBodyPerceptsItemIntensityMax = 1;
+
+export const sendMessageBodyPerceptsItemDetailMax = 32;
+
+export const sendMessageBodyPerceptsMax = 8;
+
 
 
 export const SendMessageBody = zod.object({
-  "content": zod.string().min(1)
+  "content": zod.string().min(1),
+  "percepts": zod.array(zod.object({
+  "kind": zod.enum(['shake', 'charging', 'battery_low', 'daypart']),
+  "intensity": zod.number().min(sendMessageBodyPerceptsItemIntensityMin).max(sendMessageBodyPerceptsItemIntensityMax).describe('How salient the moment felt, 0-1'),
+  "at": zod.number().describe('When it happened (epoch milliseconds, client clock)'),
+  "detail": zod.string().max(sendMessageBodyPerceptsItemDetailMax).optional().describe('Optional qualifier, e.g. the daypart bucket (\"late_night\")')
+}).describe('One gentle, privacy-safe moment of device perception (opt-in only).')).max(sendMessageBodyPerceptsMax).optional().describe('Device percepts sensed since the last send (opt-in senses only)')
 })
 
 export const SendMessageResponse = zod.object({
@@ -208,10 +227,25 @@ export const CompanionCheckInParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const companionCheckInBodyPerceptsItemIntensityMin = 0;
+export const companionCheckInBodyPerceptsItemIntensityMax = 1;
+
+export const companionCheckInBodyPerceptsItemDetailMax = 32;
+
+export const companionCheckInBodyPerceptsMax = 8;
+
+
+
 export const CompanionCheckInBody = zod.object({
   "hoursAway": zod.number().describe('Approximate hours since the user last interacted'),
   "mood": zod.string().describe('The companion\'s current mood label (e.g. sleepy, happy, bright)'),
-  "missingYou": zod.number().optional().describe('How much the companion has been missing the user, 0-100')
+  "missingYou": zod.number().optional().describe('How much the companion has been missing the user, 0-100'),
+  "percepts": zod.array(zod.object({
+  "kind": zod.enum(['shake', 'charging', 'battery_low', 'daypart']),
+  "intensity": zod.number().min(companionCheckInBodyPerceptsItemIntensityMin).max(companionCheckInBodyPerceptsItemIntensityMax).describe('How salient the moment felt, 0-1'),
+  "at": zod.number().describe('When it happened (epoch milliseconds, client clock)'),
+  "detail": zod.string().max(companionCheckInBodyPerceptsItemDetailMax).optional().describe('Optional qualifier, e.g. the daypart bucket (\"late_night\")')
+}).describe('One gentle, privacy-safe moment of device perception (opt-in only).')).max(companionCheckInBodyPerceptsMax).optional().describe('Device percepts sensed since the last send (opt-in senses only)')
 })
 
 export const CompanionCheckInResponse = zod.object({
@@ -247,6 +281,19 @@ export const GetCompanionSelfResponse = zod.object({
   "affinity": zod.number()
 })),
   "narrative": zod.array(zod.string()),
+  "facts": zod.array(zod.object({
+  "key": zod.string().describe('Stable slot identifier (e.g. \"dog_name\") — a later update to the same slot replaces the text.'),
+  "text": zod.string().describe('The remembered statement, third-person (\"Their dog is called Milo\").'),
+  "salience": zod.number().describe('How firmly the fact is held right now (0-100); grows on re-mention, fades over time.')
+})).describe('Durable personal facts the companion remembers about the user, most salient first.'),
+  "chapters": zod.array(zod.object({
+  "from": zod.number().describe('Epoch ms of the earliest moment the chapter covers.'),
+  "to": zod.number().describe('Epoch ms of the latest moment the chapter covers.'),
+  "text": zod.string().describe('The condensed chapter text, second person (\"Back then you…\").'),
+  "themes": zod.array(zod.string()).describe('Core themes of the period (normalized topic keys).'),
+  "sourceLines": zod.array(zod.string()).optional().describe('Optional source lines that grounded this chapter.'),
+  "memoryDate": zod.number().optional().describe('Optional representative epoch ms for the chapter memory.')
+})).describe('The condensed life story so far — dated chapters, oldest first.'),
   "interactions": zod.number(),
   "ageHours": zod.number(),
   "themes": zod.record(zod.string(), zod.string()).nullable().describe('Meaning-based grouping of curiosities, computed server-side — maps a normalized interest topic key to its theme label. Topics absent from the map stand alone. Null when grouping is temporarily unavailable.')
@@ -292,6 +339,40 @@ export const GetCompanionMemoryParams = zod.object({
 })
 
 export const GetCompanionMemoryResponse = zod.object({
+  "summary": zod.string().nullable().describe('The rolling context summary of earlier messages, or null if nothing has been summarised yet.')
+})
+
+
+/**
+ * Replaces the rolling context summary with user-provided text so the user can correct or trim what the companion recalls.
+ * @summary Edit what the companion remembers about the conversation
+ */
+export const UpdateCompanionMemoryParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const updateCompanionMemoryBodySummaryMax = 2000;
+
+
+
+export const UpdateCompanionMemoryBody = zod.object({
+  "summary": zod.string().min(1).max(updateCompanionMemoryBodySummaryMax).describe('The corrected summary text the companion should remember.')
+})
+
+export const UpdateCompanionMemoryResponse = zod.object({
+  "summary": zod.string().nullable().describe('The rolling context summary of earlier messages, or null if nothing has been summarised yet.')
+})
+
+
+/**
+ * Removes the stored rolling context summary and resets the summariser watermark, returning the memory to its empty state.
+ * @summary Clear what the companion remembers about the conversation
+ */
+export const ClearCompanionMemoryParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ClearCompanionMemoryResponse = zod.object({
   "summary": zod.string().nullable().describe('The rolling context summary of earlier messages, or null if nothing has been summarised yet.')
 })
 
@@ -363,6 +444,84 @@ export const SynthesizeSpeechBody = zod.object({
 export const SynthesizeSpeechResponse = zod.object({
   "audio": zod.string().describe('Base64-encoded MP3 audio'),
   "format": zod.string()
+})
+
+
+/**
+ * @summary Load the messages for a specific conversation
+ */
+export const GetConversationMessagesParams = zod.object({
+  "conversationId": zod.coerce.number().describe('Numeric id of the conversation.')
+})
+
+export const GetConversationMessagesHeader = zod.object({
+  "Authorization": zod.string().optional().describe('Opaque session token — `Bearer <sid>`.')
+})
+
+export const GetConversationMessagesResponse = zod.object({
+  "messages": zod.array(zod.object({
+  "id": zod.string(),
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string(),
+  "timestamp": zod.number().describe('Unix timestamp in milliseconds.')
+}))
+})
+
+
+/**
+ * @summary Append a message to a specific conversation
+ */
+export const SaveConversationMessageParams = zod.object({
+  "conversationId": zod.coerce.number().describe('Numeric id of the conversation.')
+})
+
+export const SaveConversationMessageHeader = zod.object({
+  "Authorization": zod.string().optional().describe('Opaque session token — `Bearer <sid>`.')
+})
+
+
+
+
+export const SaveConversationMessageBody = zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string().min(1)
+})
+
+export const SaveConversationMessageResponse = zod.object({
+  "message": zod.object({
+  "id": zod.string(),
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string(),
+  "timestamp": zod.number().describe('Unix timestamp in milliseconds.')
+})
+})
+
+
+/**
+ * @summary Delete a specific conversation and its messages
+ */
+export const DeleteConversationParams = zod.object({
+  "conversationId": zod.coerce.number().describe('Numeric id of the conversation.')
+})
+
+export const DeleteConversationHeader = zod.object({
+  "Authorization": zod.string().optional().describe('Opaque session token — `Bearer <sid>`.')
+})
+
+export const DeleteConversationResponse = zod.object({
+  "success": zod.boolean()
+})
+
+
+/**
+ * @summary Permanently delete the authenticated user and all their data
+ */
+export const DeleteAccountHeader = zod.object({
+  "Authorization": zod.string().optional().describe('Opaque session token — `Bearer <sid>`.')
+})
+
+export const DeleteAccountResponse = zod.object({
+  "success": zod.boolean()
 })
 
 

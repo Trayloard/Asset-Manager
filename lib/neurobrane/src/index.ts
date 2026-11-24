@@ -15,6 +15,7 @@ export {
   hydrate,
   project,
   evolve,
+  perceive,
   composePersona,
   summarizeSelf,
   deriveMessageSignal,
@@ -24,7 +25,33 @@ export { normalizeTopic, preferredDisplay } from "./util";
 export {
   coreSelfBlock,
   CORE_SELF_BLOCK_ID,
+  normalizeCoreSelf,
+  selectPersonaChapters,
+  type ArchivedLine,
+  type Chapter,
   type CoreSelfData,
   type Interest,
+  type NarrativeLine,
 } from "./blocks/coreSelf";
+export { pendingBiographyLines, applyChapter } from "./biography";
+export {
+  applyReflection,
+  getLastReflectedAt,
+  shouldReflect,
+  REFLECTION_BLOCK_ID,
+} from "./reflection";
 export { drivesBlock, DRIVES_BLOCK_ID, type DrivesData } from "./blocks/drives";
+export {
+  sensesBlock,
+  SENSES_BLOCK_ID,
+  sanitizePercepts,
+  perceptDriveNudges,
+  type SensesData,
+} from "./blocks/senses";
+export {
+  memoryBlock,
+  MEMORY_BLOCK_ID,
+  normalizeFactKey,
+  type Fact,
+  type MemoryData,
+} from "./blocks/memory";

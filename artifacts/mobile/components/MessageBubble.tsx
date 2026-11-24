@@ -2,7 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useEffect } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View, useColorScheme } from "react-native";
 import Animated, {
   Easing,
   cancelAnimation,
@@ -17,21 +17,41 @@ import Animated, {
 
 import { FONTS } from "@/constants/fonts";
 import { useColors } from "@/hooks/useColors";
+import { hexToRgba, spectrumForWarmth } from "@/lib/accent";
 
 interface MessageBubbleProps {
   role: string;
   content: string;
+  /**
+   * Smoothed personality warmth (see `useSmoothedWarmth`). Gently tints the
+   * user-bubble gradient; `0` keeps the neutral brand gradient unchanged.
+   */
+  warmth?: number;
+  /**
+   * Personality-derived accent hex (from `accentForWarmth`). Tints the
+   * assistant bubble border so Empiri's character is subtly present in every
+   * reply. At warmth=0 this is the neutral `statusAccent`, keeping the design
+   * consistent with the rest of the chrome. Omit to fall back to `glassBorder`.
+   */
+  accent?: string;
 }
 
-export function MessageBubble({ role, content }: MessageBubbleProps) {
+export function MessageBubble({ role, content, warmth = 0, accent }: MessageBubbleProps) {
   const colors = useColors();
+  const scheme = useColorScheme();
   const isUser = role === "user";
 
   if (isUser) {
+    const tinted = spectrumForWarmth(warmth, colors.spectrum);
+    const bubbleColors: [string, string] =
+      scheme === "dark"
+        ? [hexToRgba(tinted[0], 0.3), hexToRgba(tinted[1], 0.3)]
+        : [tinted[0], tinted[1]];
+
     return (
       <View style={[styles.row, { justifyContent: "flex-end" }]}>
         <LinearGradient
-          colors={colors.userBubble}
+          colors={bubbleColors}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={[
@@ -48,13 +68,17 @@ export function MessageBubble({ role, content }: MessageBubbleProps) {
     );
   }
 
+  // Assistant bubble border: personality-tinted when an accent is provided,
+  // falling back to the static glass border when the parent has no warmth data.
+  const assistantBorderColor = accent ? `${accent}40` : colors.glassBorder;
+
   return (
     <View style={[styles.row, { justifyContent: "flex-start" }]}>
       <View
         style={[
           styles.bubble,
           styles.assistantBubble,
-          { backgroundColor: colors.glass, borderColor: colors.glassBorder },
+          { backgroundColor: colors.glass, borderColor: assistantBorderColor },
         ]}
       >
         <BlurView

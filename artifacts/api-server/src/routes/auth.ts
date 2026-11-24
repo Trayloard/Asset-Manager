@@ -5,8 +5,10 @@ import {
   ExchangeMobileAuthorizationCodeBody,
   ExchangeMobileAuthorizationCodeResponse,
   LogoutMobileSessionResponse,
+  DeleteAccountResponse,
 } from "@workspace/api-zod";
-import { db, usersTable } from "@workspace/db";
+import { db, usersTable, sessionsTable } from "@workspace/db";
+import { eq, sql } from "drizzle-orm";
 import {
   clearSession,
   getOidcConfig,
@@ -313,6 +315,29 @@ router.post("/mobile-auth/logout", async (req: Request, res: Response) => {
     await deleteSession(sid);
   }
   res.json(LogoutMobileSessionResponse.parse({ success: true }));
+});
+
+router.delete("/account", async (req: Request, res: Response) => {
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
+  const userId = req.user.id;
+
+  await db.transaction(async (tx) => {
+    // Remove every session for this user (current device + any others) so the
+    // bearer token / cookie can no longer authenticate once the user is gone.
+    await tx
+      .delete(sessionsTable)
+      .where(sql`${sessionsTable.sess} -> 'user' ->> 'id' = ${userId}`);
+
+    // Deleting the user cascades to their conversations and messages.
+    await tx.delete(usersTable).where(eq(usersTable.id, userId));
+  });
+
+  res.clearCookie(SESSION_COOKIE, { path: "/" });
+  res.json(DeleteAccountResponse.parse({ success: true }));
 });
 
 export default router;

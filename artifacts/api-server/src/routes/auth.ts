@@ -25,11 +25,39 @@ const OIDC_COOKIE_TTL = 10 * 60 * 1000;
 
 const router: IRouter = Router();
 
+/**
+ * Returns the application's base origin for building OIDC redirect URIs.
+ *
+ * Preference order:
+ *  1. APP_BASE_URL env var (recommended in production — eliminates header injection entirely).
+ *  2. Header-derived origin, validated against the ALLOWED_ORIGINS allowlist.
+ *     If ALLOWED_ORIGINS is set and the derived origin is not in it, an error is thrown.
+ *
+ * Set APP_BASE_URL (e.g. "https://myapp.replit.app") in your environment to
+ * use a fixed, trusted origin instead of relying on request headers.
+ */
+const ALLOWED_ORIGINS: Set<string> = new Set(
+  (process.env.ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+);
+
 function getOrigin(req: Request): string {
+  if (process.env.APP_BASE_URL) {
+    return process.env.APP_BASE_URL.replace(/\/$/, "");
+  }
+
   const proto = req.headers["x-forwarded-proto"] || "https";
   const host =
     req.headers["x-forwarded-host"] || req.headers["host"] || "localhost";
-  return `${proto}://${host}`;
+  const origin = `${proto}://${host}`;
+
+  if (ALLOWED_ORIGINS.size > 0 && !ALLOWED_ORIGINS.has(origin)) {
+    throw new Error(`Untrusted origin: ${origin}`);
+  }
+
+  return origin;
 }
 
 function setSessionCookie(res: Response, sid: string) {
@@ -94,7 +122,13 @@ router.get("/auth/user", (req: Request, res: Response) => {
 
 router.get("/login", async (req: Request, res: Response) => {
   const config = await getOidcConfig();
-  const callbackUrl = `${getOrigin(req)}/api/callback`;
+  let callbackUrl: string;
+  try {
+    callbackUrl = `${getOrigin(req)}/api/callback`;
+  } catch {
+    res.status(400).send("Bad Request: untrusted origin");
+    return;
+  }
 
   const returnTo = getSafeReturnTo(req.query.returnTo);
 
@@ -125,7 +159,13 @@ router.get("/login", async (req: Request, res: Response) => {
 // parameters not expressed in the schema.
 router.get("/callback", async (req: Request, res: Response) => {
   const config = await getOidcConfig();
-  const callbackUrl = `${getOrigin(req)}/api/callback`;
+  let callbackUrl: string;
+  try {
+    callbackUrl = `${getOrigin(req)}/api/callback`;
+  } catch {
+    res.status(400).send("Bad Request: untrusted origin");
+    return;
+  }
 
   const codeVerifier = req.cookies?.code_verifier;
   const nonce = req.cookies?.nonce;
@@ -191,7 +231,13 @@ router.get("/callback", async (req: Request, res: Response) => {
 
 router.get("/logout", async (req: Request, res: Response) => {
   const config = await getOidcConfig();
-  const origin = getOrigin(req);
+  let origin: string;
+  try {
+    origin = getOrigin(req);
+  } catch {
+    res.status(400).send("Bad Request: untrusted origin");
+    return;
+  }
 
   const sid = getSessionId(req);
   await clearSession(res, sid);

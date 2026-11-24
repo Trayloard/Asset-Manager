@@ -9,7 +9,6 @@ import { authMiddleware } from "./middlewares/authMiddleware";
 
 const app: Express = express();
 
-<<<<<<< HEAD
 const userOrIpKeyGenerator = (req: express.Request): string =>
   req.user?.id ?? ipKeyGenerator(req.ip ?? "unknown");
 
@@ -18,7 +17,9 @@ const authLimiter = rateLimit({
   max: 20,
   standardHeaders: "draft-8",
   legacyHeaders: false,
-  message: { error: "Too many authentication attempts. Please try again later." },
+  message: {
+    error: "Too many authentication attempts. Please try again later.",
+  },
 });
 
 const aiLimiter = rateLimit({
@@ -28,13 +29,13 @@ const aiLimiter = rateLimit({
   standardHeaders: "draft-8",
   legacyHeaders: false,
   message: { error: "Too many requests. Please try again later." },
-=======
+});
+
 // Root-level health check — must sit before authMiddleware so the deployment
 // platform's probe never hits DB session logic. Returns 200 so autoscale and
 // the dev workflow's ensurePreviewReachable check both succeed.
 app.get("/", (_req, res) => {
   res.json({ status: "ok" });
->>>>>>> origin/main
 });
 
 app.use(

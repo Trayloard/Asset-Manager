@@ -95,6 +95,7 @@ app.use(authMiddleware);
 
 app.use("/api/login", authLimiter);
 app.use("/api/mobile-auth", authLimiter);
+app.use("/api/ai", aiLimiter);
 app.use("/api/voice", aiLimiter);
 app.use("/api/conversations", aiLimiter);
 app.use("/api", router);
